@@ -102,7 +102,7 @@ export class Room {
   async destroy(): Promise<void> {
     // Flush before tearing anything down: this is the path a graceful shutdown
     // and the last-client-leaves case both take.
-    await this.sink.flush();
+    await this.sink.close();
 
     this.doc.off('update', this.onDocUpdate);
     this.awareness.off('update', this.onAwarenessUpdate);

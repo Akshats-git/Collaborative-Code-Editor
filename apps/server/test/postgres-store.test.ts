@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, describe, test } from 'node:test';
 import * as Y from 'yjs';
-import { createApp } from '../src/app.js';
 import { PostgresDocumentStore } from '../src/persistence/index.js';
+import { withServer } from './support/server.js';
 import { TestClient, settle } from './support/y-client.js';
 
 const connectionString = process.env.TEST_DATABASE_URL;
@@ -67,23 +67,25 @@ describe(
     test('edits made over a socket are still there after a restart', async () => {
       const id = `test-${randomUUID()}`;
 
-      const first = createApp({ store });
-      const firstPort = await first.listen(0);
-      const author = await TestClient.connect(`ws://127.0.0.1:${firstPort}/doc/${id}`);
-      await settle();
-      author.insert(0, 'stored in postgres');
-      author.close();
-      await first.close();
+      await withServer(store, async (url) => {
+        const author = await TestClient.connect(`${url}/doc/${id}`);
+        try {
+          await settle();
+          author.insert(0, 'stored in postgres');
+        } finally {
+          author.close();
+        }
+      });
 
-      const second = createApp({ store });
-      const secondPort = await second.listen(0);
-      const reader = await TestClient.connect(`ws://127.0.0.1:${secondPort}/doc/${id}`);
-      await settle();
-
-      assert.equal(reader.text, 'stored in postgres');
-
-      reader.close();
-      await second.close();
+      await withServer(store, async (url) => {
+        const reader = await TestClient.connect(`${url}/doc/${id}`);
+        try {
+          await settle();
+          assert.equal(reader.text, 'stored in postgres');
+        } finally {
+          reader.close();
+        }
+      });
     });
   },
 );

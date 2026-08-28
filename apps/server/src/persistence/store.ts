@@ -24,9 +24,16 @@ export interface DocumentStore {
 export interface UpdateSink {
   record(update: Uint8Array): void;
   flush(): Promise<void>;
+  /**
+   * Final flush. Unlike `flush`, a failure here is not retried -- there is
+   * nothing left to retry into, and rescheduling would keep the process alive
+   * forever against a store that is not coming back.
+   */
+  close(): Promise<void>;
 }
 
 export const NO_PERSISTENCE: UpdateSink = {
   record() {},
   async flush() {},
+  async close() {},
 };

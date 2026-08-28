@@ -27,6 +27,7 @@ export class DocumentWriter implements UpdateSink {
   private pending: Uint8Array[] = [];
   private pendingBytes = 0;
   private timer: NodeJS.Timeout | undefined;
+  private closed = false;
   /** Serialises writes so two flushes cannot interleave on the same document. */
   private queue: Promise<void> = Promise.resolve();
 
@@ -46,7 +47,7 @@ export class DocumentWriter implements UpdateSink {
       return;
     }
 
-    this.timer ??= setTimeout(() => void this.flush(), this.options.debounceMs);
+    this.schedule();
   }
 
   flush(): Promise<void> {
@@ -64,6 +65,21 @@ export class DocumentWriter implements UpdateSink {
     return this.queue;
   }
 
+  async close(): Promise<void> {
+    this.closed = true;
+    await this.flush();
+  }
+
+  /**
+   * The timer is unref'd so a pending batch cannot hold the process open. The
+   * shutdown path flushes explicitly rather than relying on it firing.
+   */
+  private schedule(): void {
+    if (this.timer || this.closed) return;
+    this.timer = setTimeout(() => void this.flush(), this.options.debounceMs);
+    this.timer.unref();
+  }
+
   private async write(batch: Uint8Array[]): Promise<void> {
     const merged = batch.length === 1 ? batch[0]! : Y.mergeUpdates(batch);
 
@@ -71,17 +87,30 @@ export class DocumentWriter implements UpdateSink {
       await this.store.append(this.documentId, merged);
       this.rowsSinceSnapshot += 1;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (this.closed) {
+        // Shutting down and the store is unreachable. This is data loss, and it
+        // should be loud, but retrying here would hang the process.
+        logger.error('dropping updates, store unreachable during shutdown', {
+          documentId: this.documentId,
+          bytes: merged.byteLength,
+          error: message,
+        });
+        return;
+      }
+
       logger.error('failed to persist update, will retry', {
         documentId: this.documentId,
         bytes: merged.byteLength,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       });
 
       // Safe to push back on the end rather than the front: Yjs updates commute,
       // so the batch does not need to keep its position in the queue.
       this.pending.push(merged);
       this.pendingBytes += merged.byteLength;
-      this.timer ??= setTimeout(() => void this.flush(), this.options.debounceMs);
+      this.schedule();
       return;
     }
 
