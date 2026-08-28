@@ -81,3 +81,15 @@ body {
 .cm-editor.cm-focused {
   outline: none;
 }
+
+/*
+ * y-codemirror.next ships the layout for remote carets and selections; these
+ * only make the name label legible against the editor background.
+ */
+.cm-ySelectionInfo {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 3px 3px 3px 0;
+  opacity: 1;
+}

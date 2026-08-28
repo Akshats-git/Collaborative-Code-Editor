@@ -175,3 +175,84 @@ instant the socket opens. Those frames arrive before the room exists, so the
 gateway holds up to 32 of them and drains them once the load finishes
 ([`gateway.ts`](apps/server/src/ws/gateway.ts)). Simultaneous joins to a cold
 document share one read rather than each starting their own.
+
+
+---
+
+## Phase 2b — authentication
+
+The socket authenticates itself before it is allowed near a document. A
+connection starts in an unauthenticated state, must send a signed token as its
+very first frame, and is dropped after 5 seconds if it does not
+([`connection.ts`](apps/server/src/ws/connection.ts)). No room is loaded and no
+document state is sent until the token verifies, so an unauthenticated socket
+costs one timer and nothing else.
+
+### Why the token travels in the first message
+
+Browsers cannot set headers on a WebSocket handshake — `new WebSocket(url,
+protocols)` is the entire API — so the usual `Authorization: Bearer` is not
+available. The alternatives:
+
+| Approach | Why not |
+| --- | --- |
+| `?token=...` in the URL | The URL ends up in access logs, proxy logs and error reports. A bearer token in a log file is a leaked credential. |
+| Cookie | The client is on Vercel and the server on Render: different sites, so it needs `SameSite=None; Secure` plus CORS credentials, and browsers are actively restricting exactly that. |
+| Smuggle it in `Sec-WebSocket-Protocol` | Works everywhere, but abuses a header meant for protocol negotiation and constrains the token's charset. |
+| **First message after connect** | The socket exists before we know who owns it. Bounded with a timeout and a room that is not touched until the token verifies. |
+
+The last one is the only option whose downside is something the server controls.
+
+### Why the token is hand-rolled and not a JWT library
+
+`base64url(claims).base64url(hmac_sha256(claims))`, verified with
+`timingSafeEqual` ([`token.ts`](apps/server/src/auth/token.ts)). One algorithm,
+one key, and no `alg` field for an attacker to set to `none` — which is the
+classic JWT vulnerability and is unreachable here because there is nothing to
+negotiate.
+
+What it gives up is everything a real deployment eventually wants: asymmetric
+keys, JWKS, rotation, revocation. Those come from an identity provider, and the
+point at which one gets plugged in is `createSession` in
+[`http.ts`](apps/server/src/http.ts) — nothing else would change.
+
+### What this deliberately is not
+
+`POST /api/session` hands a token to anyone who asks and takes the display name
+on trust, and any authenticated user may open any document. There is no account
+system and no per-document authorization. This establishes the *mechanism* —
+signed, short-lived, expiring credentials that the socket verifies before
+joining — not identity.
+
+`AUTH_SECRET` has to be the same on every instance. Nothing pins a client to the
+instance that issued its token, so a token minted by one has to verify on any
+other.
+
+### Expiry without kicking people out
+
+Tokens last an hour, and an editing session can last longer. The client fetches
+its token *before* opening each socket rather than after, refreshing when the
+current one is close to expiring ([`auth.ts`](apps/web/src/auth.ts)). If the
+server ever does refuse a token, the client clears it and reconnects with a
+fresh one, so `Unauthorized` is a retryable close code rather than a terminal
+one.
+
+---
+
+## Phase 2c — presence
+
+Cursors, selections and names are carried on the awareness protocol, which is a
+separate message type on a separate code path that never reaches the store.
+
+The server tracks which awareness client IDs each socket introduced
+([`client.ts`](apps/server/src/ws/client.ts)) and removes exactly those when the
+socket closes, so a dropped connection cannot leave a ghost cursor behind. The
+browser also announces its own departure on `beforeunload` while the socket is
+still open, so a closed tab disappears immediately instead of at the next
+heartbeat sweep.
+
+The distinction is the point: **document state is durable and must never lose an
+update; presence is disposable and must never outlive its connection.** They get
+opposite treatment everywhere — different message types, different broadcast
+paths, and only one of them is written down. `npm test` asserts that a
+document's stored state comes back with the text and none of the cursors.

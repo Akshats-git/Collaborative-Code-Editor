@@ -1,6 +1,9 @@
 export interface User {
   name: string;
+  /** Caret and name label. */
   color: string;
+  /** Selection highlight. The same hue at low alpha, so text stays readable. */
+  colorLight: string;
 }
 
 /** Distinguishable at a glance and readable against a dark editor background. */
@@ -20,7 +23,8 @@ export function localUser(): User {
   const cached = sessionStorage.getItem('cce.user');
   if (cached) return JSON.parse(cached) as User;
 
-  const user: User = { name: pick(ANIMALS), color: pick(COLORS) };
+  const color = pick(COLORS);
+  const user: User = { name: pick(ANIMALS), color, colorLight: `${color}33` };
   sessionStorage.setItem('cce.user', JSON.stringify(user));
   return user;
 }
