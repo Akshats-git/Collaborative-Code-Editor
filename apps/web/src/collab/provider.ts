@@ -3,7 +3,8 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import type * as Y from 'yjs';
-import { MessageType, decodeMessage, encodeMessage, isTerminalCloseCode } from '@cce/protocol';
+import { CloseCode, MessageType, decodeMessage, encodeMessage, isTerminalCloseCode } from '@cce/protocol';
+import type { TokenRequest } from '../auth.js';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'offline' | 'rejected';
 
@@ -11,6 +12,8 @@ export interface CollabProviderOptions {
   url: string;
   doc: Y.Doc;
   awareness: awarenessProtocol.Awareness;
+  /** Resolves a session token. Called before every connection attempt. */
+  getToken(request: TokenRequest): Promise<string>;
 }
 
 const RECONNECT_BASE_MS = 500;
@@ -39,27 +42,31 @@ export class CollabProvider {
   private readonly doc: Y.Doc;
   private readonly awareness: awarenessProtocol.Awareness;
   private readonly url: string;
+  private readonly getToken: (request: TokenRequest) => Promise<string>;
 
   private socket: WebSocket | undefined;
   private status: ConnectionStatus = 'offline';
   private readonly listeners = new Set<(status: ConnectionStatus) => void>();
 
   private attempt = 0;
+  /** Set when the server refused our token, so the next attempt asks for a new one. */
+  private refreshToken = false;
   private reconnectTimer: number | undefined;
   private pingTimer: number | undefined;
   private pongTimer: number | undefined;
   private destroyed = false;
 
-  constructor({ url, doc, awareness }: CollabProviderOptions) {
+  constructor({ url, doc, awareness, getToken }: CollabProviderOptions) {
     this.url = url;
     this.doc = doc;
     this.awareness = awareness;
+    this.getToken = getToken;
 
     this.doc.on('update', this.onDocUpdate);
     this.awareness.on('update', this.onAwarenessUpdate);
     window.addEventListener('beforeunload', this.onUnload);
 
-    this.connect();
+    void this.connect();
   }
 
   onStatusChange(listener: (status: ConnectionStatus) => void): () => void {
@@ -78,10 +85,24 @@ export class CollabProvider {
     this.socket = undefined;
   }
 
-  private connect(): void {
+  private async connect(): Promise<void> {
+    if (this.destroyed) return;
+    this.setStatus('connecting');
+
+    // The token is fetched before the socket opens, not after: the server drops
+    // sockets that do not authenticate within a few seconds, and this way an
+    // expired token costs an HTTP round trip rather than a failed connection.
+    let token: string;
+    try {
+      token = await this.getToken({ refresh: this.refreshToken });
+      this.refreshToken = false;
+    } catch {
+      this.setStatus('offline');
+      this.scheduleReconnect();
+      return;
+    }
     if (this.destroyed) return;
 
-    this.setStatus('connecting');
     const socket = new WebSocket(this.url);
     socket.binaryType = 'arraybuffer';
     this.socket = socket;
@@ -89,6 +110,9 @@ export class CollabProvider {
     socket.onopen = () => {
       this.attempt = 0;
       this.setStatus('connected');
+
+      // Must be the first frame. Anything else and the server closes the socket.
+      this.send({ type: MessageType.Auth, token });
 
       // Step 1 carries our state vector, not the document. On a reconnect the
       // server answers with only the updates we missed, so a 30 second dropout
@@ -129,6 +153,9 @@ export class CollabProvider {
         this.setStatus('rejected');
         return;
       }
+
+      // Most often an expired token. Reconnect, but ask for a fresh one first.
+      if (event.code === CloseCode.Unauthorized) this.refreshToken = true;
 
       this.setStatus('offline');
       this.scheduleReconnect();
@@ -216,7 +243,7 @@ export class CollabProvider {
     const jittered = delay * (0.5 + Math.random() * 0.5);
     this.attempt += 1;
 
-    this.reconnectTimer = window.setTimeout(() => this.connect(), jittered);
+    this.reconnectTimer = window.setTimeout(() => void this.connect(), jittered);
   }
 
   private clearTimers(): void {

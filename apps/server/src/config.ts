@@ -18,6 +18,17 @@ export const config = {
     intervalMs: int('HEARTBEAT_INTERVAL_MS', 30_000),
   },
 
+  auth: {
+    /** Shared by every instance. Unset means tokens do not survive a restart. */
+    secret: process.env.AUTH_SECRET ?? '',
+    ttlSeconds: int('AUTH_TTL_SECONDS', 3600),
+    /** How long a socket may sit unauthenticated before it is dropped. */
+    handshakeTimeoutMs: int('AUTH_TIMEOUT_MS', 5_000),
+  },
+
+  /** Origin allowed to call the HTTP API. The WebSocket path does not use cookies. */
+  corsOrigin: process.env.CORS_ORIGIN ?? '*',
+
   persistence: {
     /** Upper bound on how much editing a hard crash can lose. */
     debounceMs: int('PERSIST_DEBOUNCE_MS', 500),

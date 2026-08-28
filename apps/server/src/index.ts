@@ -2,6 +2,10 @@ import { createApp } from './app.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
 
+if (!config.auth.secret) {
+  logger.warn('AUTH_SECRET is not set, tokens will not verify across restarts or instances');
+}
+
 const app = createApp();
 await app.listen(config.port);
 

@@ -16,11 +16,12 @@ export const CloseCode = {
 
 export type CloseCodeValue = (typeof CloseCode)[keyof typeof CloseCode];
 
-/** Codes where reconnecting with the same credentials would fail identically. */
-const TERMINAL: ReadonlySet<number> = new Set<number>([
-  CloseCode.Unauthorized,
-  CloseCode.DocumentNotSpecified,
-]);
+/**
+ * Codes where reconnecting cannot help. `Unauthorized` is deliberately not here:
+ * the usual cause is an expired token, and the client's answer is to fetch a
+ * fresh one and try again rather than to give up.
+ */
+const TERMINAL: ReadonlySet<number> = new Set<number>([CloseCode.DocumentNotSpecified]);
 
 export function isTerminalCloseCode(code: number): boolean {
   return TERMINAL.has(code);

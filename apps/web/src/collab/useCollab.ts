@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
+import { sessionSource } from '../auth.js';
 import { socketUrl } from '../config.js';
 import type { User } from '../user.js';
 import { CollabProvider, type ConnectionStatus } from './provider.js';
@@ -30,7 +31,12 @@ export function useCollab(documentId: string, user: User) {
     const awareness = new Awareness(doc);
     awareness.setLocalStateField('user', user);
 
-    const provider = new CollabProvider({ url: socketUrl(documentId), doc, awareness });
+    const provider = new CollabProvider({
+      url: socketUrl(documentId),
+      doc,
+      awareness,
+      getToken: sessionSource(user.name),
+    });
     const unsubscribe = provider.onStatusChange(setStatus);
 
     const readPeers = () => {
