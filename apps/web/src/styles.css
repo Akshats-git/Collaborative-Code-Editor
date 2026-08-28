@@ -1,0 +1,83 @@
+:root {
+  --bg: #1e2127;
+  --panel: #23272e;
+  --border: #31363f;
+  --text: #abb2bf;
+  --muted: #6b727e;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 ui-sans-serif, system-ui, sans-serif;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.doc {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: #e5c07b;
+}
+
+.status {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.status--connected {
+  color: #98c379;
+}
+
+.status--offline,
+.status--rejected {
+  color: #e06c75;
+}
+
+.peers {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 0 auto;
+  padding: 0;
+  list-style: none;
+}
+
+.peers li {
+  padding: 2px 8px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.editor {
+  flex: 1;
+  overflow: auto;
+}
+
+.cm-editor {
+  height: 100%;
+}
+
+.cm-editor.cm-focused {
+  outline: none;
+}

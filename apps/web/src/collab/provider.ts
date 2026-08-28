@@ -1,0 +1,236 @@
+import * as awarenessProtocol from 'y-protocols/awareness';
+import * as syncProtocol from 'y-protocols/sync';
+import * as decoding from 'lib0/decoding';
+import * as encoding from 'lib0/encoding';
+import type * as Y from 'yjs';
+import { MessageType, decodeMessage, encodeMessage, isTerminalCloseCode } from '@cce/protocol';
+
+export type ConnectionStatus = 'connecting' | 'connected' | 'offline' | 'rejected';
+
+export interface CollabProviderOptions {
+  url: string;
+  doc: Y.Doc;
+  awareness: awarenessProtocol.Awareness;
+}
+
+const RECONNECT_BASE_MS = 500;
+const RECONNECT_MAX_MS = 15_000;
+
+/**
+ * How often the client probes the server, and how long it waits for the reply.
+ *
+ * The browser WebSocket API does not expose protocol-level ping/pong frames, so
+ * the server's heartbeat is invisible to us here. A client that wants to notice
+ * a silently dead server has to run its own probe in the other direction, which
+ * is what these two timers are for.
+ */
+const PING_INTERVAL_MS = 20_000;
+const PONG_TIMEOUT_MS = 10_000;
+
+/**
+ * Speaks the Yjs sync and awareness protocols over a single binary WebSocket,
+ * and keeps that socket alive across network drops.
+ *
+ * This is deliberately hand-rolled rather than `y-websocket`: reconnect,
+ * heartbeat and backoff are the parts of this project worth being able to
+ * explain, and they are about 120 lines.
+ */
+export class CollabProvider {
+  private readonly doc: Y.Doc;
+  private readonly awareness: awarenessProtocol.Awareness;
+  private readonly url: string;
+
+  private socket: WebSocket | undefined;
+  private status: ConnectionStatus = 'offline';
+  private readonly listeners = new Set<(status: ConnectionStatus) => void>();
+
+  private attempt = 0;
+  private reconnectTimer: number | undefined;
+  private pingTimer: number | undefined;
+  private pongTimer: number | undefined;
+  private destroyed = false;
+
+  constructor({ url, doc, awareness }: CollabProviderOptions) {
+    this.url = url;
+    this.doc = doc;
+    this.awareness = awareness;
+
+    this.doc.on('update', this.onDocUpdate);
+    this.awareness.on('update', this.onAwarenessUpdate);
+    window.addEventListener('beforeunload', this.onUnload);
+
+    this.connect();
+  }
+
+  onStatusChange(listener: (status: ConnectionStatus) => void): () => void {
+    this.listeners.add(listener);
+    listener(this.status);
+    return () => this.listeners.delete(listener);
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    this.doc.off('update', this.onDocUpdate);
+    this.awareness.off('update', this.onAwarenessUpdate);
+    window.removeEventListener('beforeunload', this.onUnload);
+    this.clearTimers();
+    this.socket?.close();
+    this.socket = undefined;
+  }
+
+  private connect(): void {
+    if (this.destroyed) return;
+
+    this.setStatus('connecting');
+    const socket = new WebSocket(this.url);
+    socket.binaryType = 'arraybuffer';
+    this.socket = socket;
+
+    socket.onopen = () => {
+      this.attempt = 0;
+      this.setStatus('connected');
+
+      // Step 1 carries our state vector, not the document. On a reconnect the
+      // server answers with only the updates we missed, so a 30 second dropout
+      // costs a few hundred bytes rather than a full document fetch.
+      const sync = encoding.createEncoder();
+      syncProtocol.writeSyncStep1(sync, this.doc);
+      this.send({ type: MessageType.Sync, payload: encoding.toUint8Array(sync) });
+
+      const local = this.awareness.getLocalState();
+      if (local !== null) {
+        this.send({
+          type: MessageType.Awareness,
+          payload: awarenessProtocol.encodeAwarenessUpdate(this.awareness, [this.doc.clientID]),
+        });
+      }
+
+      this.startPinging();
+    };
+
+    socket.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+      this.onFrame(new Uint8Array(event.data));
+    };
+
+    socket.onclose = (event) => {
+      this.clearTimers();
+      this.socket = undefined;
+
+      // Everyone else's cursors are stale the moment we lose the socket.
+      awarenessProtocol.removeAwarenessStates(
+        this.awareness,
+        [...this.awareness.getStates().keys()].filter((id) => id !== this.doc.clientID),
+        'disconnect',
+      );
+
+      if (this.destroyed) return;
+
+      if (isTerminalCloseCode(event.code)) {
+        this.setStatus('rejected');
+        return;
+      }
+
+      this.setStatus('offline');
+      this.scheduleReconnect();
+    };
+
+    // `onerror` is always followed by `onclose`, so reconnect is handled there.
+    socket.onerror = () => socket.close();
+  }
+
+  private onFrame(frame: Uint8Array): void {
+    const message = decodeMessage(frame);
+
+    switch (message.type) {
+      case MessageType.Sync: {
+        const decoder = decoding.createDecoder(message.payload);
+        const encoder = encoding.createEncoder();
+        syncProtocol.readSyncMessage(decoder, encoder, this.doc, this);
+        if (encoding.length(encoder) > 0) {
+          this.send({ type: MessageType.Sync, payload: encoding.toUint8Array(encoder) });
+        }
+        break;
+      }
+      case MessageType.Awareness:
+        awarenessProtocol.applyAwarenessUpdate(this.awareness, message.payload, this);
+        break;
+      case MessageType.Pong:
+        if (this.pongTimer !== undefined) window.clearTimeout(this.pongTimer);
+        this.pongTimer = undefined;
+        break;
+      default:
+        break;
+    }
+  }
+
+  private onDocUpdate = (update: Uint8Array, origin: unknown): void => {
+    // Updates that arrived from the server are already applied everywhere.
+    if (origin === this) return;
+
+    const encoder = encoding.createEncoder();
+    syncProtocol.writeUpdate(encoder, update);
+    this.send({ type: MessageType.Sync, payload: encoding.toUint8Array(encoder) });
+  };
+
+  private onAwarenessUpdate = (
+    change: { added: number[]; updated: number[]; removed: number[] },
+    origin: unknown,
+  ): void => {
+    if (origin === this) return;
+
+    const changed = [...change.added, ...change.updated, ...change.removed];
+    this.send({
+      type: MessageType.Awareness,
+      payload: awarenessProtocol.encodeAwarenessUpdate(this.awareness, changed),
+    });
+  };
+
+  private onUnload = (): void => {
+    // Tell the room we are gone while the socket is still open, instead of
+    // making everyone wait out the server's heartbeat interval.
+    awarenessProtocol.removeAwarenessStates(this.awareness, [this.doc.clientID], 'unload');
+  };
+
+  private send(message: Parameters<typeof encodeMessage>[0]): void {
+    if (this.socket?.readyState !== WebSocket.OPEN) return;
+    this.socket.send(encodeMessage(message));
+  }
+
+  private startPinging(): void {
+    this.pingTimer = window.setInterval(() => {
+      if (this.pongTimer !== undefined) return;
+
+      this.send({ type: MessageType.Ping });
+      this.pongTimer = window.setTimeout(() => {
+        // Socket looks open but nothing is coming back. Drop it and let the
+        // close handler reconnect.
+        this.socket?.close();
+      }, PONG_TIMEOUT_MS);
+    }, PING_INTERVAL_MS);
+  }
+
+  private scheduleReconnect(): void {
+    // Exponential backoff with jitter: without the jitter, every client knocked
+    // off by one server restart comes back in the same millisecond.
+    const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** this.attempt);
+    const jittered = delay * (0.5 + Math.random() * 0.5);
+    this.attempt += 1;
+
+    this.reconnectTimer = window.setTimeout(() => this.connect(), jittered);
+  }
+
+  private clearTimers(): void {
+    if (this.pingTimer !== undefined) window.clearInterval(this.pingTimer);
+    if (this.pongTimer !== undefined) window.clearTimeout(this.pongTimer);
+    if (this.reconnectTimer !== undefined) window.clearTimeout(this.reconnectTimer);
+    this.pingTimer = undefined;
+    this.pongTimer = undefined;
+    this.reconnectTimer = undefined;
+  }
+
+  private setStatus(status: ConnectionStatus): void {
+    if (this.status === status) return;
+    this.status = status;
+    for (const listener of this.listeners) listener(status);
+  }
+}
