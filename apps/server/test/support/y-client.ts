@@ -1,0 +1,73 @@
+import * as decoding from 'lib0/decoding';
+import * as encoding from 'lib0/encoding';
+import { WebSocket } from 'ws';
+import * as syncProtocol from 'y-protocols/sync';
+import * as Y from 'yjs';
+import { MessageType, decodeMessage, encodeMessage } from '@cce/protocol';
+
+const REMOTE = 'remote';
+
+/**
+ * A minimal Yjs client for tests: enough of the sync protocol to talk to the
+ * server, without the browser-only reconnect machinery the real client has.
+ */
+export class TestClient {
+  readonly doc = new Y.Doc();
+  private readonly socket: WebSocket;
+
+  private constructor(url: string) {
+    this.socket = new WebSocket(url);
+    this.socket.binaryType = 'arraybuffer';
+
+    this.socket.on('message', (data: ArrayBuffer) => {
+      const message = decodeMessage(new Uint8Array(data));
+      if (message.type !== MessageType.Sync) return;
+
+      const encoder = encoding.createEncoder();
+      syncProtocol.readSyncMessage(decoding.createDecoder(message.payload), encoder, this.doc, REMOTE);
+      if (encoding.length(encoder) > 0) this.sendSync(encoding.toUint8Array(encoder));
+    });
+
+    this.doc.on('update', (update, origin) => {
+      if (origin === REMOTE) return;
+      const encoder = encoding.createEncoder();
+      syncProtocol.writeUpdate(encoder, update);
+      this.sendSync(encoding.toUint8Array(encoder));
+    });
+  }
+
+  static async connect(url: string): Promise<TestClient> {
+    const client = new TestClient(url);
+    await new Promise<void>((resolve, reject) => {
+      client.socket.once('open', resolve);
+      client.socket.once('error', reject);
+    });
+
+    const encoder = encoding.createEncoder();
+    syncProtocol.writeSyncStep1(encoder, client.doc);
+    client.sendSync(encoding.toUint8Array(encoder));
+    return client;
+  }
+
+  get text(): string {
+    return this.doc.getText('content').toString();
+  }
+
+  insert(index: number, value: string): void {
+    this.doc.getText('content').insert(index, value);
+  }
+
+  close(): void {
+    this.socket.close();
+    this.doc.destroy();
+  }
+
+  private sendSync(payload: Uint8Array): void {
+    if (this.socket.readyState !== WebSocket.OPEN) return;
+    this.socket.send(encodeMessage({ type: MessageType.Sync, payload }));
+  }
+}
+
+export function settle(ms = 250): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

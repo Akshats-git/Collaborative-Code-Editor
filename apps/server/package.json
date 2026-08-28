@@ -1,0 +1,26 @@
+{
+  "name": "@cce/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -b",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@cce/protocol": "*",
+    "lib0": "^0.2.98",
+    "ws": "^8.18.0",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2"
+  }
+}
