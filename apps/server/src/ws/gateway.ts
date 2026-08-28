@@ -4,7 +4,7 @@ import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { CloseCode, MessageType, decodeMessage, encodeMessage } from '@cce/protocol';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
-import { RoomRegistry } from '../rooms/registry.js';
+import type { RoomRegistry } from '../rooms/registry.js';
 import type { Room } from '../rooms/room.js';
 import { Client } from './client.js';
 import { Heartbeat } from './heartbeat.js';
@@ -12,13 +12,19 @@ import { Heartbeat } from './heartbeat.js';
 const DOCUMENT_PATH = /^\/doc\/([A-Za-z0-9_-]{1,64})$/;
 
 /**
- * Terminates WebSocket connections and routes their frames to the right room.
+ * Frames a client may send before its document has finished loading. A well
+ * behaved client sends one; the cap is there so a hostile one cannot make us
+ * buffer indefinitely while a slow read is in flight.
  */
+const MAX_QUEUED_FRAMES = 32;
+
+/** Terminates WebSocket connections and routes their frames to the right room. */
 export class Gateway {
   private readonly wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
   private readonly clients = new Set<Client>();
-  private readonly rooms = new RoomRegistry();
   private readonly heartbeat = new Heartbeat(this.clients, config.heartbeat.intervalMs);
+
+  constructor(private readonly rooms: RoomRegistry) {}
 
   start(): void {
     this.heartbeat.start();
@@ -51,19 +57,28 @@ export class Gateway {
       client.close(CloseCode.ServerShuttingDown, 'server shutting down');
     }
     await new Promise<void>((resolve) => this.wss.close(() => resolve()));
+    await this.rooms.closeAll();
   }
 
   private onConnection(socket: WebSocket, documentId: string): void {
     const client = new Client(socket, documentId);
     this.clients.add(client);
-
-    const room = this.rooms.join(client);
     logger.info('client connected', { clientId: client.id, documentId });
+
+    // The document may still be loading from the store when the client's first
+    // sync frame lands, so hold frames until the room is ready.
+    let room: Room | undefined;
+    const queued: Uint8Array[] = [];
 
     socket.on('message', (data: RawData, isBinary: boolean) => {
       if (!isBinary) return;
       try {
-        this.onMessage(room, client, toUint8Array(data));
+        const frame = toUint8Array(data);
+        if (room) {
+          this.dispatch(room, client, frame);
+        } else if (queued.length < MAX_QUEUED_FRAMES) {
+          queued.push(frame.slice());
+        }
       } catch (error) {
         logger.warn('dropping malformed frame', {
           clientId: client.id,
@@ -81,14 +96,37 @@ export class Gateway {
       logger.warn('socket error', { clientId: client.id, error: error.message });
     });
 
-    socket.on('close', () => {
-      this.clients.delete(client);
-      this.rooms.leave(room, client);
-      logger.info('client disconnected', { clientId: client.id, documentId });
-    });
+    this.rooms
+      .join(client)
+      .then((joined) => {
+        if (socket.readyState !== socket.OPEN) {
+          // Client gave up while we were reading the document.
+          return this.rooms.leave(joined, client);
+        }
+
+        room = joined;
+        socket.on('close', () => void this.onClose(joined, client));
+
+        for (const frame of queued) this.dispatch(joined, client, frame);
+        queued.length = 0;
+      })
+      .catch((error: unknown) => {
+        logger.error('failed to open document', {
+          documentId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        this.clients.delete(client);
+        client.close(CloseCode.DocumentUnavailable, 'could not load document');
+      });
   }
 
-  private onMessage(room: Room, client: Client, frame: Uint8Array): void {
+  private async onClose(room: Room, client: Client): Promise<void> {
+    this.clients.delete(client);
+    await this.rooms.leave(room, client);
+    logger.info('client disconnected', { clientId: client.id, documentId: client.documentId });
+  }
+
+  private dispatch(room: Room, client: Client, frame: Uint8Array): void {
     const message = decodeMessage(frame);
 
     switch (message.type) {

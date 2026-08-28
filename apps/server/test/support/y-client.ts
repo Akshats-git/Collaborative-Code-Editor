@@ -9,25 +9,16 @@ const REMOTE = 'remote';
 
 /**
  * A minimal Yjs client for tests: enough of the sync protocol to talk to the
- * server, without the browser-only reconnect machinery the real client has.
+ * server, plus a byte counter so tests can assert that a reconnect fetches a
+ * delta rather than the whole document.
  */
 export class TestClient {
   readonly doc = new Y.Doc();
-  private readonly socket: WebSocket;
+  bytesReceived = 0;
 
-  private constructor(url: string) {
-    this.socket = new WebSocket(url);
-    this.socket.binaryType = 'arraybuffer';
+  private socket: WebSocket | undefined;
 
-    this.socket.on('message', (data: ArrayBuffer) => {
-      const message = decodeMessage(new Uint8Array(data));
-      if (message.type !== MessageType.Sync) return;
-
-      const encoder = encoding.createEncoder();
-      syncProtocol.readSyncMessage(decoding.createDecoder(message.payload), encoder, this.doc, REMOTE);
-      if (encoding.length(encoder) > 0) this.sendSync(encoding.toUint8Array(encoder));
-    });
-
+  private constructor(private readonly url: string) {
     this.doc.on('update', (update, origin) => {
       if (origin === REMOTE) return;
       const encoder = encoding.createEncoder();
@@ -38,14 +29,7 @@ export class TestClient {
 
   static async connect(url: string): Promise<TestClient> {
     const client = new TestClient(url);
-    await new Promise<void>((resolve, reject) => {
-      client.socket.once('open', resolve);
-      client.socket.once('error', reject);
-    });
-
-    const encoder = encoding.createEncoder();
-    syncProtocol.writeSyncStep1(encoder, client.doc);
-    client.sendSync(encoding.toUint8Array(encoder));
+    await client.open();
     return client;
   }
 
@@ -57,13 +41,45 @@ export class TestClient {
     this.doc.getText('content').insert(index, value);
   }
 
+  /** Opens the socket and offers the server our current state vector. */
+  async open(): Promise<void> {
+    const socket = new WebSocket(this.url);
+    socket.binaryType = 'arraybuffer';
+    this.socket = socket;
+
+    socket.on('message', (data: ArrayBuffer) => {
+      this.bytesReceived += data.byteLength;
+      const message = decodeMessage(new Uint8Array(data));
+      if (message.type !== MessageType.Sync) return;
+
+      const encoder = encoding.createEncoder();
+      syncProtocol.readSyncMessage(decoding.createDecoder(message.payload), encoder, this.doc, REMOTE);
+      if (encoding.length(encoder) > 0) this.sendSync(encoding.toUint8Array(encoder));
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', resolve);
+      socket.once('error', reject);
+    });
+
+    const encoder = encoding.createEncoder();
+    syncProtocol.writeSyncStep1(encoder, this.doc);
+    this.sendSync(encoding.toUint8Array(encoder));
+  }
+
+  /** Drops the connection but keeps the local document, as a tab going offline would. */
+  disconnect(): void {
+    this.socket?.close();
+    this.socket = undefined;
+  }
+
   close(): void {
-    this.socket.close();
+    this.disconnect();
     this.doc.destroy();
   }
 
   private sendSync(payload: Uint8Array): void {
-    if (this.socket.readyState !== WebSocket.OPEN) return;
+    if (this.socket?.readyState !== WebSocket.OPEN) return;
     this.socket.send(encodeMessage({ type: MessageType.Sync, payload }));
   }
 }

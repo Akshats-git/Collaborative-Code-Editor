@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { createApp } from '../src/app.js';
+import { MemoryDocumentStore } from '../src/persistence/index.js';
 import { TestClient, settle } from './support/y-client.js';
 
-const app = createApp();
+const app = createApp({ store: new MemoryDocumentStore() });
 let baseUrl = '';
 
 before(async () => {

@@ -1,6 +1,9 @@
 import type { Server } from 'node:http';
+import { config } from './config.js';
 import { createHttpServer } from './http.js';
 import { logger } from './logger.js';
+import { createDocumentStore, type DocumentStore } from './persistence/index.js';
+import { RoomRegistry } from './rooms/registry.js';
 import { Gateway } from './ws/gateway.js';
 
 export interface App {
@@ -9,13 +12,24 @@ export interface App {
   close(): Promise<void>;
 }
 
+export interface AppOptions {
+  /**
+   * Overridable so tests can run against an in-memory store. A store passed in
+   * here belongs to the caller and is left open when the app shuts down.
+   */
+  store?: DocumentStore;
+}
+
 /**
- * Wires the HTTP server to the WebSocket gateway and hands back start/stop
- * controls. Keeping this separate from `index.ts` means tests can run a real
- * server on an ephemeral port instead of mocking the transport.
+ * Wires the store, the room registry and the WebSocket gateway together and
+ * hands back start/stop controls. Keeping this separate from `index.ts` means
+ * tests can run a real server on an ephemeral port instead of mocking transport.
  */
-export function createApp(): App {
-  const gateway = new Gateway();
+export function createApp(options: AppOptions = {}): App {
+  const store = options.store ?? createDocumentStore();
+  const ownsStore = options.store === undefined;
+  const rooms = new RoomRegistry(store, config.persistence);
+  const gateway = new Gateway(rooms);
   const server: Server = createHttpServer(gateway);
 
   server.on('upgrade', (request, socket, head) => {
@@ -36,8 +50,11 @@ export function createApp(): App {
     },
 
     async close() {
+      // Order matters: stop accepting frames, flush every room, then drop the
+      // connection pool. Reversing it would throw away unwritten updates.
       await gateway.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
+      if (ownsStore) await store.close();
     },
   };
 }

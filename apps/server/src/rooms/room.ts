@@ -4,7 +4,14 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import { MessageType, encodeMessage } from '@cce/protocol';
+import { NO_PERSISTENCE, type UpdateSink } from '../persistence/store.js';
 import { Client } from '../ws/client.js';
+
+/**
+ * Transaction origin used when replaying stored state into a fresh document, so
+ * the writer does not immediately persist what it just read back.
+ */
+const HYDRATE = Symbol('hydrate');
 
 /**
  * A room is a document plus everyone currently editing it.
@@ -19,13 +26,21 @@ export class Room {
 
   private readonly clients = new Set<Client>();
 
-  constructor(readonly id: string) {
+  constructor(
+    readonly id: string,
+    private readonly sink: UpdateSink = NO_PERSISTENCE,
+  ) {
     this.awareness = new awarenessProtocol.Awareness(this.doc);
     // The server observes presence but is not itself a participant.
     this.awareness.setLocalState(null);
 
     this.doc.on('update', this.onDocUpdate);
     this.awareness.on('update', this.onAwarenessUpdate);
+  }
+
+  /** Replays persisted state into an empty room, before any client joins. */
+  hydrate(state: Uint8Array): void {
+    Y.applyUpdate(this.doc, state, HYDRATE);
   }
 
   get clientCount(): number {
@@ -84,7 +99,11 @@ export class Room {
     awarenessProtocol.applyAwarenessUpdate(this.awareness, payload, client);
   }
 
-  destroy(): void {
+  async destroy(): Promise<void> {
+    // Flush before tearing anything down: this is the path a graceful shutdown
+    // and the last-client-leaves case both take.
+    await this.sink.flush();
+
     this.doc.off('update', this.onDocUpdate);
     this.awareness.off('update', this.onAwarenessUpdate);
     this.awareness.destroy();
@@ -92,6 +111,8 @@ export class Room {
   }
 
   private onDocUpdate = (update: Uint8Array, origin: unknown): void => {
+    if (origin !== HYDRATE) this.sink.record(update);
+
     const encoder = encoding.createEncoder();
     syncProtocol.writeUpdate(encoder, update);
     const frame = encodeMessage({ type: MessageType.Sync, payload: encoding.toUint8Array(encoder) });

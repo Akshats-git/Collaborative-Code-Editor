@@ -1,0 +1,101 @@
+import * as Y from 'yjs';
+import { logger } from '../logger.js';
+import type { DocumentStore, UpdateSink } from './store.js';
+
+export interface WriterOptions {
+  /** Quiet period after the last update before the batch is written. */
+  debounceMs: number;
+  /** Write immediately once a batch reaches this size, however recent it is. */
+  maxBatchBytes: number;
+  /** Fold the update log into a new snapshot after this many appended rows. */
+  compactAfter: number;
+}
+
+/**
+ * Batches a room's updates on their way to the store.
+ *
+ * Writing every keystroke straight through would mean one insert per character
+ * per editor, which a free-tier Postgres will not enjoy. Instead updates are
+ * merged in memory and flushed after a short quiet period, so a burst of typing
+ * becomes one row.
+ *
+ * The durability this buys is explicit: a hard crash loses at most `debounceMs`
+ * of edits. SIGTERM and the last client leaving both flush first, so an ordinary
+ * restart or deploy loses nothing.
+ */
+export class DocumentWriter implements UpdateSink {
+  private pending: Uint8Array[] = [];
+  private pendingBytes = 0;
+  private timer: NodeJS.Timeout | undefined;
+  /** Serialises writes so two flushes cannot interleave on the same document. */
+  private queue: Promise<void> = Promise.resolve();
+
+  constructor(
+    private readonly documentId: string,
+    private readonly store: DocumentStore,
+    private readonly options: WriterOptions,
+    private rowsSinceSnapshot: number,
+  ) {}
+
+  record(update: Uint8Array): void {
+    this.pending.push(update);
+    this.pendingBytes += update.byteLength;
+
+    if (this.pendingBytes >= this.options.maxBatchBytes) {
+      void this.flush();
+      return;
+    }
+
+    this.timer ??= setTimeout(() => void this.flush(), this.options.debounceMs);
+  }
+
+  flush(): Promise<void> {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+    }
+    if (this.pending.length === 0) return this.queue;
+
+    const batch = this.pending;
+    this.pending = [];
+    this.pendingBytes = 0;
+
+    this.queue = this.queue.then(() => this.write(batch));
+    return this.queue;
+  }
+
+  private async write(batch: Uint8Array[]): Promise<void> {
+    const merged = batch.length === 1 ? batch[0]! : Y.mergeUpdates(batch);
+
+    try {
+      await this.store.append(this.documentId, merged);
+      this.rowsSinceSnapshot += 1;
+    } catch (error) {
+      logger.error('failed to persist update, will retry', {
+        documentId: this.documentId,
+        bytes: merged.byteLength,
+        error: error instanceof Error ? error.message : String(error),
+      });
+
+      // Safe to push back on the end rather than the front: Yjs updates commute,
+      // so the batch does not need to keep its position in the queue.
+      this.pending.push(merged);
+      this.pendingBytes += merged.byteLength;
+      this.timer ??= setTimeout(() => void this.flush(), this.options.debounceMs);
+      return;
+    }
+
+    if (this.rowsSinceSnapshot < this.options.compactAfter) return;
+
+    try {
+      await this.store.compact(this.documentId);
+      this.rowsSinceSnapshot = 0;
+    } catch (error) {
+      // Compaction is an optimisation. Failing it costs read performance, not data.
+      logger.warn('compaction failed', {
+        documentId: this.documentId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+}

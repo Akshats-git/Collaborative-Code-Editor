@@ -9,17 +9,20 @@
     "build": "tsc -b",
     "start": "node dist/index.js",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "db:setup": "tsx src/persistence/setup.ts"
   },
   "dependencies": {
     "@cce/protocol": "*",
     "lib0": "^0.2.98",
+    "pg": "^8.23.0",
     "ws": "^8.18.0",
     "y-protocols": "^1.0.6",
     "yjs": "^13.6.20"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
+    "@types/pg": "^8.23.1",
     "@types/ws": "^8.5.13",
     "tsx": "^4.19.2"
   }

@@ -8,11 +8,20 @@ function int(name: string, fallback: number): number {
 
 export const config = {
   port: int('PORT', 8080),
+  /** Unset means no durability: documents live only as long as the process. */
+  databaseUrl: process.env.DATABASE_URL ?? '',
   /** Identifies this process in logs. Useful once several instances are running. */
   instanceId: process.env.INSTANCE_ID ?? `srv-${process.pid}`,
 
   heartbeat: {
     /** How often the server pings each socket. */
     intervalMs: int('HEARTBEAT_INTERVAL_MS', 30_000),
+  },
+
+  persistence: {
+    /** Upper bound on how much editing a hard crash can lose. */
+    debounceMs: int('PERSIST_DEBOUNCE_MS', 500),
+    maxBatchBytes: int('PERSIST_MAX_BATCH_BYTES', 64 * 1024),
+    compactAfter: int('COMPACT_AFTER_UPDATES', 200),
   },
 } as const;

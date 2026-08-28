@@ -41,6 +41,18 @@ Open <http://localhost:5173?doc=demo> in two tabs and type in both.
 npm test             # boots a real server and asserts convergence
 ```
 
+Documents are held in memory unless `DATABASE_URL` is set, so the two commands
+above need no database. To run with Postgres:
+
+```bash
+docker run -d --name cce-pg -p 55432:5432 \
+  -e POSTGRES_USER=cce -e POSTGRES_PASSWORD=cce -e POSTGRES_DB=cce postgres:16-alpine
+
+export DATABASE_URL=postgres://cce:cce@localhost:55432/cce
+npm run db:setup -w @cce/server
+npm run dev
+```
+
 ---
 
 ## Phase 1 — single-node sync
@@ -101,3 +113,65 @@ Yjs updates are binary diffs. Putting one through `JSON.stringify` means base64
 (+33%) or an array of numbers (worse), on every keystroke, for every client in
 the room. The envelope is one type byte followed by the raw payload —
 [`messages.ts`](packages/protocol/src/messages.ts).
+
+
+---
+
+## Phase 2a — persistence
+
+Documents are stored as **one snapshot plus an append-only log of the updates
+that came after it** ([`sql/schema.sql`](apps/server/sql/schema.sql)). A room is
+loaded on the first join and dropped when the last client leaves, so an idle
+instance holds nothing in memory.
+
+`npm test` covers the done-condition: text written to one server process is
+still there after that process exits and a new one starts against the same store.
+
+### Why a log and not "save the document"
+
+Writing the whole document on every change is O(document) per keystroke and it
+makes two concurrent writers race — last write wins, and the loser's edits are
+gone. Appending is O(update), never reads, never locks, and two instances
+appending to the same document cannot conflict. Yjs updates are commutative and
+idempotent, so replaying the log in any order rebuilds the same document.
+
+The cost is read time: a document with 50k updates is 50k rows to replay. That is
+what compaction is for. After `COMPACT_AFTER_UPDATES` appends, one transaction
+rebuilds the snapshot from the log and truncates it.
+
+Compaction reads its input from the database rather than from the live in-memory
+document, and takes a `pg_advisory_xact_lock` on the document first. Both matter
+once there is more than one instance: another process may have appended updates
+this one has never seen, and folding the log away using only local state would
+delete them.
+
+### Why writes are batched, and what that costs
+
+One insert per keystroke per editor is a lot of round trips for a free-tier
+Postgres. Updates are merged in memory and flushed after a 500ms quiet period, so
+a burst of typing becomes a single row
+([`writer.ts`](apps/server/src/persistence/writer.ts)).
+
+The durability guarantee is therefore explicit rather than absolute: **a hard
+crash loses at most `PERSIST_DEBOUNCE_MS` of edits.** SIGTERM and the last client
+leaving both flush first, so an ordinary restart or deploy loses nothing. If a
+write fails the batch goes back on the queue and is retried, which is only safe
+because Yjs updates commute — the retry does not have to keep its place in line.
+
+### Why reconnecting is cheap
+
+The client's first frame after connecting is sync step 1, which carries a *state
+vector* — a small map of "the last clock I have seen from each author" — not the
+document. The server replies with only the updates missing from it.
+
+In the test suite a 50KB document costs ~50KB on a first connect and under 2KB
+to resume after a dropout. This falls out of the sync protocol rather than being
+something this repo implements, which is most of the argument for using Yjs.
+
+### Why the gateway queues frames
+
+Loading a document is asynchronous, but the client sends its state vector the
+instant the socket opens. Those frames arrive before the room exists, so the
+gateway holds up to 32 of them and drains them once the load finishes
+([`gateway.ts`](apps/server/src/ws/gateway.ts)). Simultaneous joins to a cold
+document share one read rather than each starting their own.

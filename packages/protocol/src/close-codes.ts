@@ -10,6 +10,8 @@ export const CloseCode = {
   /** Send buffer grew past the point where the client could catch up. */
   Backpressure: 4004,
   ServerShuttingDown: 4005,
+  /** The document could not be loaded. Transient: retrying is reasonable. */
+  DocumentUnavailable: 4006,
 } as const;
 
 export type CloseCodeValue = (typeof CloseCode)[keyof typeof CloseCode];
