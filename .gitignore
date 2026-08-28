@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+.env.local
+*.tsbuildinfo
+.DS_Store
+apps/web/dist/
+infra/k6/results/

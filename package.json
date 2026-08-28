@@ -1,0 +1,21 @@
+{
+  "name": "collaborative-code-editor",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "npm run build -w @cce/protocol && (npm run dev -w @cce/server & npm run dev -w @cce/web)",
+    "build": "npm run build -w @cce/protocol && npm run build -w @cce/server && npm run build -w @cce/web",
+    "typecheck": "tsc -b",
+    "test": "npm run test -w @cce/server"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
