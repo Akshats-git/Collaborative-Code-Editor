@@ -1,0 +1,38 @@
+# Render blueprint for the WebSocket server.
+#
+# The server lives here rather than on Vercel because Vercel Functions cannot
+# hold a connection open: their WebSocket support inherits the function timeout,
+# which is 60 seconds on Hobby. A collaborative session is a socket that stays
+# open for hours.
+#
+# Postgres and Redis are not defined here on purpose -- Neon and Upstash are
+# used instead, and their URLs are pasted in as secrets.
+
+services:
+  - type: web
+    name: cce-server
+    runtime: docker
+    repo: https://github.com/akshat/CollaborativeCodeEditor
+    dockerfilePath: ./apps/server/Dockerfile
+    # The build needs the workspace root, not just apps/server.
+    dockerContext: .
+    plan: free
+    region: oregon
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8080
+      # Generated once and then held by Render. Every instance must share it, so
+      # if this ever scales past one instance, promote it to an env group.
+      - key: AUTH_SECRET
+        generateValue: true
+      # Set in the dashboard. DATABASE_URL needs ?sslmode=require for Neon.
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      # The deployed frontend's origin, e.g. https://your-app.vercel.app
+      - key: CORS_ORIGIN
+        sync: false

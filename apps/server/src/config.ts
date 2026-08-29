@@ -8,13 +8,21 @@ function int(name: string, fallback: number): number {
 
 export const config = {
   port: int('PORT', 8080),
+  /** Turns warnings that are fine locally into refusals to start. */
+  isProduction: process.env.NODE_ENV === 'production',
   /** Unset means no durability: documents live only as long as the process. */
   databaseUrl: process.env.DATABASE_URL ?? '',
   /**
    * Identifies this process in logs, and on the bus, where it is how an instance
    * recognises the echo of its own publishes. Must be unique per instance.
    */
-  instanceId: process.env.INSTANCE_ID ?? `srv-${process.pid}`,
+  instanceId:
+    process.env.INSTANCE_ID ??
+    // Render exposes this; other hosts will not, and the pid is only unique
+    // within one machine -- so set INSTANCE_ID explicitly anywhere that runs
+    // more than one instance.
+    process.env.RENDER_INSTANCE_ID ??
+    `srv-${process.pid}`,
   /** Unset means one instance: edits never leave the process that accepted them. */
   redisUrl: process.env.REDIS_URL ?? '',
 
