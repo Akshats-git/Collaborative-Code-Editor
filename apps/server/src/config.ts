@@ -34,6 +34,34 @@ export const config = {
   /** Origin allowed to call the HTTP API. The WebSocket path does not use cookies. */
   corsOrigin: process.env.CORS_ORIGIN ?? '*',
 
+  /**
+   * Per connection. Bursts are allowed at twice the sustained rate, which is
+   * what a paste or a reconnect resync looks like.
+   */
+  rateLimit: {
+    /** Budget for document traffic. A frame costs at least `minFrameCost`. */
+    bytesPerSecond: int('RATE_LIMIT_BYTES_PER_SECOND', 1024 * 1024),
+    /**
+     * Charged for every frame regardless of size, so a flood of tiny updates
+     * costs the same budget as a flood of large ones.
+     */
+    minFrameCost: int('RATE_LIMIT_MIN_FRAME_COST', 1024),
+    /** Cursor and selection frames, counted rather than weighed. */
+    presencePerSecond: int('RATE_LIMIT_PRESENCE_PER_SECOND', 60),
+  },
+
+  /**
+   * How far behind a client's send buffer may fall before we start protecting
+   * the server from it. Measured in bytes still queued in the kernel and in
+   * `ws`, which is what `bufferedAmount` reports.
+   */
+  backpressure: {
+    /** Above this, presence updates for that client are dropped. */
+    softBytes: int('BACKPRESSURE_SOFT_BYTES', 256 * 1024),
+    /** Above this, the connection is closed. Document updates are never dropped. */
+    hardBytes: int('BACKPRESSURE_HARD_BYTES', 4 * 1024 * 1024),
+  },
+
   persistence: {
     /** Upper bound on how much editing a hard crash can lose. */
     debounceMs: int('PERSIST_DEBOUNCE_MS', 500),

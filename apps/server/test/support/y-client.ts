@@ -130,6 +130,17 @@ export class TestClient {
   }
 }
 
+/** An open socket with no protocol logic, for tests that drive frames by hand. */
+export async function rawConnect(url: string): Promise<WebSocket> {
+  const socket = new WebSocket(url);
+  socket.binaryType = 'arraybuffer';
+  await new Promise<void>((resolve, reject) => {
+    socket.once('open', resolve);
+    socket.once('error', reject);
+  });
+  return socket;
+}
+
 export function settle(ms = 250): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

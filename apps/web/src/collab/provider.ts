@@ -20,6 +20,17 @@ const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 15_000;
 
 /**
+ * How long a socket has to survive before we treat the attempt as successful
+ * and reset the backoff.
+ *
+ * Resetting on `open` looks right and is not: the server can accept a socket and
+ * close it again immediately -- rate limiting does exactly that -- and a client
+ * that resets its backoff every time would reconnect into the same wall twice a
+ * second forever.
+ */
+const CONNECTION_STABLE_MS = 5_000;
+
+/**
  * How often the client probes the server, and how long it waits for the reply.
  *
  * The browser WebSocket API does not expose protocol-level ping/pong frames, so
@@ -65,6 +76,7 @@ export class CollabProvider {
   private pingTimer: number | undefined;
   private pongTimer: number | undefined;
   private awarenessTimer: number | undefined;
+  private stableTimer: number | undefined;
   private destroyed = false;
 
   constructor({ url, doc, awareness, getToken }: CollabProviderOptions) {
@@ -119,7 +131,9 @@ export class CollabProvider {
     this.socket = socket;
 
     socket.onopen = () => {
-      this.attempt = 0;
+      this.stableTimer = window.setTimeout(() => {
+        this.attempt = 0;
+      }, CONNECTION_STABLE_MS);
       this.setStatus('connected');
 
       // Must be the first frame. Anything else and the server closes the socket.
@@ -271,10 +285,12 @@ export class CollabProvider {
     if (this.pingTimer !== undefined) window.clearInterval(this.pingTimer);
     if (this.pongTimer !== undefined) window.clearTimeout(this.pongTimer);
     if (this.awarenessTimer !== undefined) window.clearInterval(this.awarenessTimer);
+    if (this.stableTimer !== undefined) window.clearTimeout(this.stableTimer);
     if (this.reconnectTimer !== undefined) window.clearTimeout(this.reconnectTimer);
     this.pingTimer = undefined;
     this.pongTimer = undefined;
     this.awarenessTimer = undefined;
+    this.stableTimer = undefined;
     this.reconnectTimer = undefined;
   }
 

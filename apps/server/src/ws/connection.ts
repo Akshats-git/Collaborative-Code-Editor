@@ -6,6 +6,7 @@ import { logger } from '../logger.js';
 import type { RoomRegistry } from '../rooms/registry.js';
 import type { Room } from '../rooms/room.js';
 import type { Client } from './client.js';
+import { TokenBucket } from './rate-limit.js';
 
 /**
  * Frames a client may send between authenticating and its document finishing
@@ -25,6 +26,20 @@ export class Connection {
   private room: Room | undefined;
   private readonly queued: Uint8Array[] = [];
   private authTimer: NodeJS.Timeout | undefined;
+
+  /**
+   * Two budgets, not one, so a client whose cursor is moving constantly cannot
+   * starve its own edits. Both allow a burst of twice the sustained rate, which
+   * is roughly what a paste or a reconnect resync looks like.
+   */
+  private readonly documentBudget = new TokenBucket(
+    config.rateLimit.bytesPerSecond * 2,
+    config.rateLimit.bytesPerSecond,
+  );
+  private readonly presenceBudget = new TokenBucket(
+    config.rateLimit.presencePerSecond * 2,
+    config.rateLimit.presencePerSecond,
+  );
 
   constructor(
     private readonly client: Client,
@@ -68,6 +83,8 @@ export class Connection {
   private onFrame(frame: Uint8Array): void {
     const message = decodeMessage(frame);
 
+    if (this.user && !this.withinLimits(message, frame.length)) return;
+
     if (!this.user) {
       if (message.type !== MessageType.Auth) {
         this.client.close(CloseCode.Unauthorized, 'authenticate first');
@@ -84,6 +101,32 @@ export class Connection {
     }
 
     this.dispatch(this.room, message);
+  }
+
+  /**
+   * The inbound half of the same rule the outbound side follows: presence is
+   * droppable and document traffic is not.
+   *
+   * A client over its presence budget just loses those frames -- nobody notices
+   * a cursor that skipped an update. A client over its document budget cannot be
+   * treated that way, because it believes the edit was delivered, so the only
+   * answer that leaves it in a correct state is to close the socket and let it
+   * resync from its state vector.
+   */
+  private withinLimits(message: ReturnType<typeof decodeMessage>, size: number): boolean {
+    if (message.type === MessageType.Awareness) {
+      return this.presenceBudget.take(1);
+    }
+    // Charged a floor per frame, so a thousand one-byte updates cost as much as
+    // the bandwidth they really consume in syscalls and parsing.
+    if (this.documentBudget.take(Math.max(size, config.rateLimit.minFrameCost))) return true;
+
+    logger.warn('closing client over its rate limit', {
+      clientId: this.client.id,
+      documentId: this.client.documentId,
+    });
+    this.client.close(CloseCode.RateLimited, 'sending too fast');
+    return false;
   }
 
   private authenticate(token: string): void {
@@ -159,6 +202,7 @@ export class Connection {
     logger.info('client disconnected', {
       clientId: this.client.id,
       documentId: this.client.documentId,
+      droppedPresence: this.client.droppedPresence,
     });
   }
 }

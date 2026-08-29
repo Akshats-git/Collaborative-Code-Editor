@@ -427,3 +427,81 @@ a peers after b leaves: [ 'stoat' ]
 
 And after `docker compose restart server-1 server-2 server-3`, a fresh client
 reading the same document gets `"survives a rolling restart"` back from Postgres.
+
+---
+
+## Phase 3c — backpressure and rate limiting
+
+Both of these come down to one rule, applied in both directions:
+
+> **Presence can be dropped. Document updates cannot.**
+
+A cursor position that never arrives is corrected by the next one a few hundred
+milliseconds later. A document update that never arrives is a client that has
+permanently diverged from everyone else, and it will look like a CRDT bug rather
+than a network problem. So the two kinds of traffic get opposite treatment under
+pressure, which is why they were kept on separate code paths from Phase 2c
+onwards.
+
+### Outbound: when a client cannot keep up
+
+`bufferedAmount` is how much a socket has queued but not yet flushed to the
+network. It grows when the reader is slower than the writer — a phone on a train,
+a laptop that just woke up — and if nothing watches it, one slow client is a
+memory leak the whole server pays for.
+
+[`client.ts`](apps/server/src/ws/client.ts) has two send methods rather than one
+with a flag, because the choice is not a parameter, it is which of two things you
+are sending:
+
+| buffered | `sendPresence` | `send` |
+| --- | --- | --- |
+| under 256 KB | sent | sent |
+| over 256 KB | dropped, counted | sent |
+| over 4 MB | dropped | **socket closed** |
+
+Closing looks drastic and is the conservative option. There is no correct way to
+silently skip a document update, but there is a correct way to disconnect: the
+client reconnects, offers its state vector, and the server replies with exactly
+what it missed. The machinery for that already exists because it is the same
+machinery that handles a dropped wifi connection.
+
+### Inbound: when a client sends too much
+
+Each connection gets two token buckets — one weighed in bytes for document
+traffic, one counted in frames for presence. Two rather than one so a client
+whose cursor is moving constantly cannot starve its own edits.
+
+Every document frame is charged at least 1 KB regardless of its real size, so a
+flood of one-byte updates costs the budget what it actually costs the server in
+syscalls and parsing, rather than nothing.
+
+A token bucket rather than a fixed window: a fixed window lets a client spend its
+entire allowance in the last millisecond of one window and again in the first
+millisecond of the next, which is twice the intended rate delivered as a single
+burst. Refill is computed from the clock when a frame arrives, so a thousand
+connections cost a thousand numbers and no timers.
+
+Over budget, the same rule applies as on the way out. Presence frames are
+dropped. Document frames close the socket, because the client believes the edit
+was delivered and the only state it can be left in honestly is one it will
+resync from.
+
+### The reconnect loop this opens
+
+Rate limiting means the server can accept a socket and close it again
+immediately, and the client's backoff reset the attempt counter on `open` — so a
+client that tripped the limit would reconnect into the same wall twice a second,
+forever. The fix is that a connection only counts as successful once it has
+survived five seconds; anything shorter keeps the backoff climbing.
+
+Worth stating because it is a general shape: an *open* is not a *success*, and
+backoff that resets on the wrong event stops being backoff.
+
+### Testing this
+
+Backpressure is tested against a fake socket with a settable `bufferedAmount`,
+which is the only way to reach these thresholds deterministically — a real slow
+client is a timing test that passes on a fast machine. The rate limiter is tested
+both ways: a client that floods gets close code 4003, and a client typing 200
+characters as fast as the loop can run does not.

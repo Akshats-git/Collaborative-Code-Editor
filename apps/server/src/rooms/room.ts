@@ -71,7 +71,7 @@ export class Room {
 
     const states = this.awareness.getStates();
     if (states.size > 0) {
-      client.send(
+      client.sendPresence(
         encodeMessage({
           type: MessageType.Awareness,
           payload: awarenessProtocol.encodeAwarenessUpdate(this.awareness, [...states.keys()]),
@@ -198,7 +198,9 @@ export class Room {
     const frame = encodeMessage({ type: MessageType.Awareness, payload });
 
     for (const client of this.clients) {
-      if (client !== origin) client.send(frame);
+      // Presence, not document state: droppable, and dropped first when a
+      // client's send buffer starts filling up.
+      if (client !== origin) client.sendPresence(frame);
     }
   };
 }
