@@ -1,9 +1,8 @@
-# Three instances behind nginx, which is the setup Phase 3 is about. Free-tier
-# hosting runs one instance, so this is where cross-instance behaviour is
-# actually exercised.
+# Three instances behind nginx. Free-tier hosting runs a single instance, so
+# this is where cross-instance behaviour is actually exercised.
 #
-#   docker compose -f infra/docker-compose.yml up --build
-#   open http://localhost:8080/doc/demo  (via the web app's VITE_WS_URL)
+#   npm run stack:up
+#   VITE_WS_URL=ws://localhost:8080 npm run dev -w @cce/web
 
 name: cce
 

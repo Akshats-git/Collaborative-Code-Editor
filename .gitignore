@@ -1,9 +1,8 @@
 node_modules/
 dist/
+dist-types/
+*.tsbuildinfo
 .env
 .env.local
-*.tsbuildinfo
 .DS_Store
-apps/web/dist/
 infra/k6/results/
-apps/web/dist-types/

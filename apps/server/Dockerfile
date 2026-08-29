@@ -19,9 +19,9 @@ COPY tsconfig.base.json tsconfig.json ./
 COPY packages/protocol packages/protocol
 COPY apps/server apps/server
 COPY apps/web apps/web
-# The web app is built here too: the server serves it, so one image is the whole
-# deployment. VITE_WS_URL is deliberately not set -- the client defaults to the
-# origin it was served from.
+# The web app is built here too. The server serves it, so one image is the
+# whole deployment. VITE_WS_URL is deliberately not set, because the client
+# defaults to the origin it was served from.
 RUN npm run build -w @cce/protocol && npm run build -w @cce/server && npm run build -w @cce/web
 
 FROM node:22-alpine AS runtime

@@ -15,8 +15,8 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
 
 // Comfortably more than one session can spend. Running past the end of the
-// pool would start replaying updates the server has already applied, which are
-// no-ops that produce no broadcast -- see the run id in editing.js.
+// pool would replay updates the server has already applied, and those are
+// no-ops that produce no broadcast. See the run id in editing.js.
 const COUNT = 2000;
 
 const frames = [];

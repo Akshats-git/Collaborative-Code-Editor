@@ -5,12 +5,11 @@
  *   k6 run -e TARGET_VUS=1000 -e BASE=http://localhost:8080 infra/k6/editing.js
  *
  * Each virtual user is one editing session with two connections open on the
- * same document -- a tab that types and a tab that watches. That is what makes
- * the interesting number measurable: the time from a keystroke leaving one
- * socket to the resulting update arriving on the other, which is the whole
- * round trip through the gateway, the room, Redis and back out again. Behind
- * nginx the two sockets usually land on different instances, so the number
- * includes the cross-instance hop.
+ * same document: a tab that types and a tab that watches. That is what makes
+ * the interesting number measurable, which is the time from a keystroke leaving
+ * one socket to the resulting update arriving on the other. Behind nginx the
+ * two sockets usually land on different instances, so it includes the
+ * cross-instance hop.
  *
  * Every VU gets its own document. That isolates the measurement, and it is
  * deliberately the expensive shape for the server: one room, one Y.Doc and one
@@ -85,10 +84,9 @@ export function setup() {
   if (res.status !== 200) throw new Error(`could not get a session token: ${res.status}`);
 
   // A fresh set of document ids per run. The update pool is pre-baked and so is
-  // identical from one run to the next, and a Yjs update the server has already
-  // applied is a no-op that produces no broadcast -- so reusing document ids
-  // makes the second run of this script silently measure nothing. Learned the
-  // hard way, twice.
+  // identical every run, and a Yjs update the server has already applied is a
+  // no-op that produces no broadcast. Reusing document ids would make the
+  // second run of this script silently measure nothing.
   return { token: res.json('token'), runId: __ENV.RUN_ID || String(Date.now()) };
 }
 
@@ -139,10 +137,10 @@ export default function (data) {
 
   // Registered before anything is opened, not inside `onopen`. k6 keeps an
   // iteration alive while the event loop has work, so hanging the session
-  // timeout off a successful connection means a *failed* connection ends the
-  // iteration immediately -- and the VU starts another one, and another. A load
-  // test that reacts to refused connections by reconnecting harder measures the
-  // storm it created rather than the server.
+  // timeout off a successful connection means a failed connection ends the
+  // iteration immediately and the VU starts another one. A load test that
+  // reacts to refused connections by reconnecting harder measures the storm it
+  // created rather than the server.
   setTimeout(stop, SESSION_SECONDS * 1000);
 
   writer.onopen = () => {
@@ -192,11 +190,11 @@ export default function (data) {
 
   reader.onmessage = () => {
     if (!readerReady) {
-      // The first frame is the server's sync step 1, which it sends the moment
-      // this socket is added to the room -- so it is the exact point at which
-      // broadcasts will start arriving. A timer here would be a guess, and
-      // under load it would be a wrong one: every session's first edit would be
-      // sent into a room the reader had not joined yet and recorded as lost.
+      // The first frame is the server's sync step 1, sent the moment this
+      // socket joins the room, so it is the exact point at which broadcasts
+      // start arriving. A timer here would be a guess, and under load a wrong
+      // one: every session's first edit would be sent into a room the reader
+      // had not joined yet and recorded as lost.
       readerReady = true;
       return;
     }
