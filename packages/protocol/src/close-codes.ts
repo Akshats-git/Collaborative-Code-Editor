@@ -10,16 +10,16 @@ export const CloseCode = {
   /** Send buffer grew past the point where the client could catch up. */
   Backpressure: 4004,
   ServerShuttingDown: 4005,
-  /** The document could not be loaded. Transient: retrying is reasonable. */
+  /** The document could not be loaded. Transient, so retrying is reasonable. */
   DocumentUnavailable: 4006,
 } as const;
 
 export type CloseCodeValue = (typeof CloseCode)[keyof typeof CloseCode];
 
 /**
- * Codes where reconnecting cannot help. `Unauthorized` is deliberately not here:
- * the usual cause is an expired token, and the client's answer is to fetch a
- * fresh one and try again rather than to give up.
+ * Codes where reconnecting cannot help. Unauthorized is deliberately not one of
+ * them: the usual cause is an expired token, and the right answer is to fetch a
+ * fresh one and try again.
  */
 const TERMINAL: ReadonlySet<number> = new Set<number>([CloseCode.DocumentNotSpecified]);
 
