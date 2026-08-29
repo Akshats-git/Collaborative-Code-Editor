@@ -1,6 +1,15 @@
-const fallback = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:8080`;
+const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
 
-/** Set VITE_WS_URL when the server is not on localhost:8080 (Render, nginx, ...). */
+/**
+ * In dev the client is served by Vite on its own port, so it has to be told
+ * where the server is. Built, it is served *by* that server, so the origin the
+ * page came from is already the right answer and a deployment configures
+ * nothing. Set VITE_WS_URL only to point a build at some other host.
+ */
+const fallback = import.meta.env.DEV
+  ? `${scheme}://${location.hostname}:8080`
+  : `${scheme}://${location.host}`;
+
 export const serverUrl: string = import.meta.env.VITE_WS_URL ?? fallback;
 
 /** The HTTP side of the same server: session tokens and health. */

@@ -1,18 +1,20 @@
-# Render blueprint for the WebSocket server.
+# Render blueprint for the whole deployment: one service that serves the built
+# client and holds its sockets open.
 #
-# The server lives here rather than on Vercel because Vercel Functions cannot
-# hold a connection open: their WebSocket support inherits the function timeout,
-# which is 60 seconds on Hobby. A collaborative session is a socket that stays
-# open for hours.
+# It is not on Vercel because Vercel Functions cannot hold a connection open --
+# their WebSocket support inherits the function timeout, 60 seconds on Hobby --
+# and a collaborative session is a socket that stays open for hours. Once you
+# need a long-lived process anyway, having it serve the static bundle too costs
+# nothing and removes an origin, a second deploy, and the CORS between them.
 #
-# Postgres and Redis are not defined here on purpose -- Neon and Upstash are
-# used instead, and their URLs are pasted in as secrets.
+# Postgres and Redis are not defined here on purpose: both are optional. Unset,
+# documents live in memory for the life of the process. Set DATABASE_URL to a
+# Neon URL to keep them.
 
 services:
   - type: web
     name: cce-server
     runtime: docker
-    repo: https://github.com/akshat/CollaborativeCodeEditor
     dockerfilePath: ./apps/server/Dockerfile
     # The build needs the workspace root, not just apps/server.
     dockerContext: .
@@ -28,11 +30,10 @@ services:
       # if this ever scales past one instance, promote it to an env group.
       - key: AUTH_SECRET
         generateValue: true
-      # Set in the dashboard. DATABASE_URL needs ?sslmode=require for Neon.
+      # Both optional, both set in the dashboard. DATABASE_URL needs
+      # ?sslmode=require for Neon; REDIS_URL only does anything with more than
+      # one instance, which the free plan does not give you.
       - key: DATABASE_URL
         sync: false
       - key: REDIS_URL
-        sync: false
-      # The deployed frontend's origin, e.g. https://your-app.vercel.app
-      - key: CORS_ORIGIN
         sync: false

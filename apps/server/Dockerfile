@@ -18,7 +18,11 @@ WORKDIR /app
 COPY tsconfig.base.json tsconfig.json ./
 COPY packages/protocol packages/protocol
 COPY apps/server apps/server
-RUN npm run build -w @cce/protocol && npm run build -w @cce/server
+COPY apps/web apps/web
+# The web app is built here too: the server serves it, so one image is the whole
+# deployment. VITE_WS_URL is deliberately not set -- the client defaults to the
+# origin it was served from.
+RUN npm run build -w @cce/protocol && npm run build -w @cce/server && npm run build -w @cce/web
 
 FROM node:22-alpine AS runtime
 WORKDIR /app
@@ -32,6 +36,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=build /app/packages/protocol/dist packages/protocol/dist
 COPY --from=build /app/apps/server/dist apps/server/dist
+COPY --from=build /app/apps/web/dist apps/web/dist
 # Read at runtime by `npm run db:setup`.
 COPY apps/server/sql apps/server/sql
 

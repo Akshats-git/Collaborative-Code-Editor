@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+
 function int(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return fallback;
@@ -41,6 +43,15 @@ export const config = {
 
   /** Origin allowed to call the HTTP API. The WebSocket path does not use cookies. */
   corsOrigin: process.env.CORS_ORIGIN ?? '*',
+
+  /**
+   * Directory of the built web app. Serving it from the same origin as the API
+   * is what makes a deployment one service and one URL -- and is why CORS_ORIGIN
+   * stops mattering once it is set. Locally this is whatever `npm run build`
+   * last produced -- Vite's dev server on :5173 is the one you actually edit
+   * against. Set WEB_ROOT= to serve nothing.
+   */
+  webRoot: process.env.WEB_ROOT ?? fileURLToPath(new URL('../../web/dist', import.meta.url)),
 
   /**
    * Per connection. Bursts are allowed at twice the sustained rate, which is
