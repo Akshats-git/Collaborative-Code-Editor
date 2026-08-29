@@ -505,3 +505,93 @@ which is the only way to reach these thresholds deterministically — a real slo
 client is a timing test that passes on a fast machine. The rate limiter is tested
 both ways: a client that floods gets close code 4003, and a client typing 200
 characters as fast as the loop can run does not.
+
+---
+
+## Phase 3d — the numbers
+
+[`infra/k6/editing.js`](infra/k6/editing.js). Each virtual user is one editing
+session holding two sockets on the same document — a tab that types and a tab
+that watches — so the metric that matters is measurable directly: **the time
+from a keystroke leaving one socket to the resulting update arriving on the
+other**, which is the whole round trip through nginx, the gateway, the room,
+Redis, and back out through a second instance. About 90% of the pairs land on
+different instances, so most samples include the cross-instance hop.
+
+### Setup
+
+Everything on one 12-core laptop: three server instances, nginx, Postgres,
+Redis and the load generator all competing for the same cores. That makes these
+numbers conservative for the server and useless as an absolute capacity figure
+for real hardware. What they are good for is the shape of the curve and where the
+cost actually sits.
+
+### 2,000 sessions / 4,000 sockets
+
+Ramped over two minutes, 45 second sessions, an edit every 400ms per session.
+
+| | |
+| --- | --- |
+| peak concurrent connections | **3,895** |
+| open rooms | 3,484 |
+| edits delivered | 417,184 (**3,090/s**) |
+| propagation median | 5 ms |
+| propagation p95 | 16 ms |
+| **propagation p99** | **30 ms** |
+| propagation max | 163 ms |
+| server ping RTT p99 | 22 ms |
+| edits lost | 0 |
+| failed connections | 2 of 8,598 |
+| memory per instance | ~275 MB |
+
+Two connections out of 8,598 were refused, at the point where the box was fully
+saturated — every server container was over 100% of a core and Postgres was at
+172%. That is the machine running out, not a limit in the design, but it is the
+honest number and it is where this stops being a useful measurement.
+
+### Where the time actually goes
+
+Rerunning the identical load with the write debounce raised from 500ms to 5s and
+compaction disabled — same 2,000 sessions, same 417,000 edits, 3,872 peak
+connections:
+
+| | 500ms debounce | 5s debounce |
+| --- | --- | --- |
+| propagation p95 | 16 ms | 11 ms |
+| propagation p99 | 30 ms | 26 ms |
+| ping RTT p99 | 22 ms | 17 ms |
+| failed connections | 2 | 0 |
+| Postgres CPU | 172% | 36% |
+| per-instance CPU | 110–130% | 55–78% |
+
+Persistence was costing about a third of the server CPU and five times the
+database CPU, for roughly 15% of the p99. So the durability setting is a real
+throughput dial, and the trade it makes is the one from Phase 2a stated in
+different units: a longer debounce buys headroom and widens the window a hard
+crash can lose.
+
+The caveat matters more than the result. This workload is one document per user
+— the worst possible shape for write amplification, because no two users' edits
+ever batch into the same write. Real usage is many people per document, where a
+single debounce window folds everyone's edits into one insert. These numbers are
+a floor, not a forecast.
+
+### Two bugs in the load test, both worth keeping
+
+**nginx defaults to one worker process.** `worker_connections` counts both ends
+of a proxied socket, so one worker at the 4096 I first set meant about 2,000
+clients — and past that, connections were refused. The first run measured nginx
+saying no. `worker_processes auto` and 16384 fixed it, and connection setup went
+from a p95 of 40 seconds to 1.8 ms.
+
+**The test was not repeatable, because the server is stateful.** The update pool
+is pre-baked so that k6 does not have to run Yjs, which means every run sends
+byte-identical updates. A Yjs update the server has already applied is a no-op
+that produces no broadcast — so the second run against the same document ids
+measured nothing at all, silently, and reported a flattering zero. Document ids
+are now unique per run *and* per iteration, and an edit that does not come back
+within five seconds is counted rather than quietly waited on forever.
+
+The second one is the more useful lesson. The load test had a threshold that
+passed, a metric that reported, and no errors — and it was measuring nothing.
+Idempotency makes a replayed workload invisible rather than wrong.
