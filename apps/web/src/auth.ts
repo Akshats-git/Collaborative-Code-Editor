@@ -17,11 +17,14 @@ const RENEW_MARGIN_MS = 60_000;
  * Returns a function that hands out a valid session token, fetching a new one
  * when the current one is close to expiring or has just been refused.
  *
+ * `name` is a getter rather than a value so that renaming yourself does not
+ * force a new token source, and therefore does not drop the socket.
+ *
  * The token is held in a closure rather than in localStorage: it is short-lived,
  * it is only useful for the tab that is holding a socket open, and keeping it
  * out of persistent storage means an XSS bug cannot read a stale one back out.
  */
-export function sessionSource(name: string): (request: TokenRequest) => Promise<string> {
+export function sessionSource(name: () => string): (request: TokenRequest) => Promise<string> {
   let session: Session | undefined;
   let inFlight: Promise<Session> | undefined;
 
@@ -29,7 +32,7 @@ export function sessionSource(name: string): (request: TokenRequest) => Promise<
     const response = await fetch(`${apiUrl}/api/session`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name: name() }),
     });
 
     if (!response.ok) {

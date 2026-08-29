@@ -10,6 +10,8 @@ export interface User {
 const COLORS = ['#e06c75', '#61afef', '#98c379', '#e5c07b', '#c678dd', '#56b6c2'];
 const ANIMALS = ['otter', 'heron', 'lynx', 'marten', 'shrike', 'ibex', 'raven', 'vole'];
 
+const STORAGE_KEY = 'cce.user';
+
 function pick<T>(items: readonly T[]): T {
   return items[Math.floor(Math.random() * items.length)] as T;
 }
@@ -20,11 +22,16 @@ function pick<T>(items: readonly T[]): T {
  * testing collaboration on one machine.
  */
 export function localUser(): User {
-  const cached = sessionStorage.getItem('cce.user');
+  const cached = sessionStorage.getItem(STORAGE_KEY);
   if (cached) return JSON.parse(cached) as User;
 
   const color = pick(COLORS);
   const user: User = { name: pick(ANIMALS), color, colorLight: `${color}33` };
-  sessionStorage.setItem('cce.user', JSON.stringify(user));
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+  return user;
+}
+
+export function saveUser(user: User): User {
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(user));
   return user;
 }
