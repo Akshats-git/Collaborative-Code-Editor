@@ -11,7 +11,7 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   rejected: 'Rejected',
 };
 
-export interface ToolbarProps {
+interface ToolbarProps {
   roomId: string;
   onLeave(): void;
   status: ConnectionStatus;

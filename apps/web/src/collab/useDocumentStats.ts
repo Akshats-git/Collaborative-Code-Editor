@@ -11,7 +11,7 @@ function measure(text: Y.Text): DocumentStats {
   return { lines: value === '' ? 1 : value.split('\n').length, characters: value.length };
 }
 
-/** Observes the shared text directly, so it counts remote edits as well as local ones. */
+/** Observes the shared text, so it counts remote edits as well as local ones. */
 export function useDocumentStats(text: Y.Text): DocumentStats {
   const [stats, setStats] = useState(() => measure(text));
 

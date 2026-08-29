@@ -3,7 +3,7 @@ import type { DocumentStats } from '../collab/useDocumentStats.js';
 import { LANGUAGES } from '../editor/languages.js';
 import type { User } from '../user.js';
 
-export interface StatusBarProps {
+interface StatusBarProps {
   language: string;
   onLanguageChange(id: string): void;
   stats: DocumentStats;

@@ -17,9 +17,9 @@ function pick<T>(items: readonly T[]): T {
 }
 
 /**
- * There is no account system yet, so an identity is generated per tab and kept
- * in sessionStorage. Two tabs are two users, which is exactly what you want when
- * testing collaboration on one machine.
+ * There is no account system, so an identity is generated per tab and kept in
+ * sessionStorage. Two tabs are two users, which is what you want when testing
+ * collaboration on one machine.
  */
 export function localUser(): User {
   const cached = sessionStorage.getItem(STORAGE_KEY);

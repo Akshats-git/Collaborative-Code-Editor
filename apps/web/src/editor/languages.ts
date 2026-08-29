@@ -22,8 +22,9 @@ export const LANGUAGES: readonly Language[] = [
   { id: 'text', label: 'Plain text', extension: () => [] },
 ];
 
-export const DEFAULT_LANGUAGE = 'typescript';
+const DEFAULT_LANGUAGE = 'typescript';
 
+/** Falls back to the default, so an unknown id from the document is harmless. */
 export function languageById(id: string | undefined): Language {
   return (
     LANGUAGES.find((language) => language.id === id) ??

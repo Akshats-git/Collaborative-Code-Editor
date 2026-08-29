@@ -19,7 +19,7 @@ import { Lobby } from './screens/Lobby.js';
 import { localUser, saveUser, type User } from './user.js';
 
 /**
- * Three states, decided by the address bar and by whether this tab has been
+ * Three screens, decided by the address bar and by whether this tab has been
  * through the door: the lobby, the join gate, and the room itself.
  */
 export function App() {
@@ -34,8 +34,8 @@ export function App() {
     document.title = roomId ? `${roomId} · Code Room` : 'Collaborative Code Editor';
   }, [roomId]);
 
-  // The address bar is part of the interface here: a room is a link, and the
-  // back button should behave.
+  // The address bar is part of the interface here. A room is a link, so the
+  // back button has to behave.
   useEffect(() => {
     const onPopState = () => {
       const current = roomFromLocation();
@@ -109,7 +109,7 @@ function Room({
 
       {status === 'offline' && (
         <p className="notice">
-          Disconnected. You can keep typing &mdash; your edits are held locally and merged when the
+          Disconnected. You can keep typing. Your edits are held locally and merged when the
           connection comes back.
         </p>
       )}

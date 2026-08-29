@@ -38,7 +38,7 @@ body {
   height: 100vh;
 }
 
-/* ---------------------------------------------------------------- toolbar */
+/* toolbar */
 
 .toolbar {
   display: flex;
@@ -102,7 +102,7 @@ body {
   margin-left: auto;
 }
 
-/* ------------------------------------------------------------------ atoms */
+/* atoms */
 
 .button {
   padding: 5px 10px;
@@ -142,7 +142,7 @@ body {
   flex: 0 0 auto;
 }
 
-/* ----------------------------------------------------------------- status */
+/* status */
 
 .status {
   display: flex;
@@ -185,7 +185,7 @@ body {
   }
 }
 
-/* ------------------------------------------------------------------ peers */
+/* peers */
 
 .peers {
   display: flex;
@@ -217,7 +217,7 @@ body {
   letter-spacing: 0.02em;
 }
 
-/* ----------------------------------------------------------------- notice */
+/* notice */
 
 .notice {
   margin: 0;
@@ -234,7 +234,7 @@ body {
   color: var(--red);
 }
 
-/* ----------------------------------------------------------------- editor */
+/* editor */
 
 .editor {
   flex: 1 1 auto;
@@ -251,8 +251,8 @@ body {
 }
 
 /*
- * y-codemirror.next ships the layout for remote carets and selections; these
- * only make the name label legible against the editor background.
+ * y-codemirror.next ships the layout for remote carets and selections. These
+ * rules only make the name label legible against the editor background.
  */
 .cm-ySelectionInfo {
   font-family: ui-sans-serif, system-ui, sans-serif;
@@ -263,7 +263,7 @@ body {
   opacity: 1;
 }
 
-/* -------------------------------------------------------------- statusbar */
+/* statusbar */
 
 .statusbar {
   display: flex;
@@ -323,10 +323,10 @@ body {
   }
 }
 
-/* ------------------------------------------------------------- gate/lobby */
+/* gate/lobby */
 
 /*
- * The lobby and the join gate are the same card on the same empty page: one is
+ * The lobby and the join gate are the same card on the same empty page. One is
  * where a room starts, the other is where a shared link lands.
  */
 .gate {

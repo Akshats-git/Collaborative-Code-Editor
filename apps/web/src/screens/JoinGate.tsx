@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-export interface JoinGateProps {
+interface JoinGateProps {
   roomId: string;
   name: string;
   onJoin(name: string): void;
@@ -9,11 +9,10 @@ export interface JoinGateProps {
 
 /**
  * What someone sees when they open a shared link. No socket is opened and no
- * document is fetched until they are through it: not joining means not seeing
- * the room at all, rather than seeing it and being unable to type.
+ * document is fetched until they are through it, so not joining means not
+ * seeing the room at all rather than seeing it and being unable to type.
  */
 export function JoinGate({ roomId, name, onJoin, onCancel }: JoinGateProps) {
-  // Empty, with the generated name as the placeholder. See Lobby.
   const [draft, setDraft] = useState('');
 
   const submit = (event: React.FormEvent) => {
@@ -31,9 +30,7 @@ export function JoinGate({ roomId, name, onJoin, onCancel }: JoinGateProps) {
 
         <p className="gate__lede">You have been invited to edit</p>
         <code className="gate__roomCode">{roomId}</code>
-        <p className="gate__lede">
-          Pick a name so everyone can tell whose cursor is whose.
-        </p>
+        <p className="gate__lede">Pick a name so everyone can tell whose cursor is whose.</p>
 
         <label className="field">
           <span className="field__label">Your name</span>

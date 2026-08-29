@@ -19,8 +19,8 @@ export interface Peer extends User {
 
 /**
  * Owns one document's lifetime: the Y.Doc, the awareness state and the socket.
- * Everything is created inside the effect so that switching documents (or React
- * StrictMode's double-mount in development) tears the previous one down cleanly.
+ * Everything is created inside the effect so that switching documents, or React
+ * StrictMode's double mount in development, tears the previous one down cleanly.
  */
 export function useCollab(documentId: string, user: User) {
   const [session, setSession] = useState<CollabSession | null>(null);
@@ -69,8 +69,8 @@ export function useCollab(documentId: string, user: User) {
     };
   }, [documentId]);
 
-  // Renaming is an awareness update, which is exactly the cheap path: no
-  // reconnect, no document traffic, and everyone else sees it immediately.
+  // Renaming is an awareness update, which is the cheap path: no reconnect, no
+  // document traffic, and everyone else sees it immediately.
   useEffect(() => {
     session?.awareness.setLocalStateField('user', user);
   }, [session, user]);

@@ -7,17 +7,21 @@ import { yCollab } from 'y-codemirror.next';
 import type { CollabSession } from '../collab/useCollab.js';
 import { languageById } from './languages.js';
 
+interface CodeEditorProps {
+  session: CollabSession;
+  language: string;
+}
+
 /**
  * CodeMirror is bound straight to the Y.Text. `yCollab` turns editor
  * transactions into Yjs updates and remote updates back into transactions, so
  * there is no local copy of the document to keep in sync.
  */
-export function CodeEditor({ session, language }: { session: CollabSession; language: string }) {
+export function CodeEditor({ session, language }: CodeEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
-  // A compartment lets the language be swapped without rebuilding the view --
-  // which matters here, because rebuilding it would drop the Yjs binding and
-  // everyone's cursors with it.
+  // A compartment swaps the language without rebuilding the view. Rebuilding it
+  // would drop the Yjs binding and everyone's cursors with it.
   const languageSlot = useRef(new Compartment());
 
   useEffect(() => {

@@ -3,7 +3,14 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import type * as Y from 'yjs';
-import { CloseCode, MessageType, decodeMessage, encodeMessage, isTerminalCloseCode } from '@cce/protocol';
+import {
+  CloseCode,
+  MessageType,
+  decodeMessage,
+  encodeMessage,
+  isTerminalCloseCode,
+  type Message,
+} from '@cce/protocol';
 import type { TokenRequest } from '../auth.js';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'offline' | 'rejected';
@@ -20,44 +27,34 @@ const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 15_000;
 
 /**
- * How long a socket has to survive before we treat the attempt as successful
- * and reset the backoff.
- *
- * Resetting on `open` looks right and is not: the server can accept a socket and
- * close it again immediately -- rate limiting does exactly that -- and a client
- * that resets its backoff every time would reconnect into the same wall twice a
- * second forever.
+ * How long a socket has to survive before the backoff resets. Resetting on
+ * `open` looks right and is not: the server can accept a socket and close it
+ * immediately, which is what rate limiting does, and a client resetting on
+ * every open would reconnect into the same wall twice a second forever.
  */
 const CONNECTION_STABLE_MS = 5_000;
 
 /**
- * How often the client probes the server, and how long it waits for the reply.
- *
- * The browser WebSocket API does not expose protocol-level ping/pong frames, so
- * the server's heartbeat is invisible to us here. A client that wants to notice
- * a silently dead server has to run its own probe in the other direction, which
- * is what these two timers are for.
+ * The browser WebSocket API does not expose protocol-level ping and pong
+ * frames, so the server's heartbeat is invisible here. Noticing a silently dead
+ * server needs our own probe in the other direction.
  */
 const PING_INTERVAL_MS = 20_000;
 const PONG_TIMEOUT_MS = 10_000;
 
 /**
- * y-protocols discards any awareness state it has not heard about for 30
- * seconds, which is the right default -- it is what stops a client that vanished
- * without a close frame from haunting everyone else's screen. The cost is that
- * someone reading rather than typing looks like they left, so we re-announce on
- * a shorter cycle. It matters more with several instances, where the removal can
- * also come from a peer that simply never heard the original.
+ * y-protocols discards awareness state it has not heard about for 30 seconds,
+ * which stops a client that vanished without a close frame from haunting
+ * everyone else's screen. The cost is that someone reading rather than typing
+ * looks like they left, so we re-announce on a shorter cycle.
  */
 const AWARENESS_REFRESH_MS = 10_000;
 
 /**
  * Speaks the Yjs sync and awareness protocols over a single binary WebSocket,
- * and keeps that socket alive across network drops.
- *
- * This is deliberately hand-rolled rather than `y-websocket`: reconnect,
- * heartbeat and backoff are the parts of this project worth being able to
- * explain, and they are about 120 lines.
+ * and keeps that socket alive across network drops. Hand rolled rather than
+ * `y-websocket`, because reconnect, heartbeat and backoff are the parts of this
+ * project worth being able to explain.
  */
 export class CollabProvider {
   private readonly doc: Y.Doc;
@@ -112,7 +109,7 @@ export class CollabProvider {
     if (this.destroyed) return;
     this.setStatus('connecting');
 
-    // The token is fetched before the socket opens, not after: the server drops
+    // The token is fetched before the socket opens, not after. The server drops
     // sockets that do not authenticate within a few seconds, and this way an
     // expired token costs an HTTP round trip rather than a failed connection.
     let token: string;
@@ -146,8 +143,7 @@ export class CollabProvider {
       syncProtocol.writeSyncStep1(sync, this.doc);
       this.send({ type: MessageType.Sync, payload: encoding.toUint8Array(sync) });
 
-      const local = this.awareness.getLocalState();
-      if (local !== null) {
+      if (this.awareness.getLocalState() !== null) {
         this.send({
           type: MessageType.Awareness,
           payload: awarenessProtocol.encodeAwarenessUpdate(this.awareness, [this.doc.clientID]),
@@ -244,7 +240,7 @@ export class CollabProvider {
     awarenessProtocol.removeAwarenessStates(this.awareness, [this.doc.clientID], 'unload');
   };
 
-  private send(message: Parameters<typeof encodeMessage>[0]): void {
+  private send(message: Message): void {
     if (this.socket?.readyState !== WebSocket.OPEN) return;
     this.socket.send(encodeMessage(message));
   }
@@ -272,7 +268,7 @@ export class CollabProvider {
   }
 
   private scheduleReconnect(): void {
-    // Exponential backoff with jitter: without the jitter, every client knocked
+    // Exponential backoff with jitter. Without the jitter, every client knocked
     // off by one server restart comes back in the same millisecond.
     const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** this.attempt);
     const jittered = delay * (0.5 + Math.random() * 0.5);

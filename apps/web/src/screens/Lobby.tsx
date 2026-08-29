@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { parseRoomInput } from '../room.js';
 
-export interface LobbyProps {
+interface LobbyProps {
   name: string;
   onCreate(name: string): void;
   onJoin(roomId: string, name: string): void;
@@ -12,7 +12,7 @@ export interface LobbyProps {
  * somebody sent you.
  */
 export function Lobby({ name, onCreate, onJoin }: LobbyProps) {
-  // Empty, with the generated name as the placeholder: pre-filling the value
+  // Empty, with the generated name as the placeholder. Pre-filling the value
   // means anyone who types is appending to a name they never chose.
   const [draftName, setDraftName] = useState('');
   const [code, setCode] = useState('');
@@ -55,7 +55,11 @@ export function Lobby({ name, onCreate, onJoin }: LobbyProps) {
           />
         </label>
 
-        <button className="button button--primary" type="button" onClick={() => onCreate(displayName())}>
+        <button
+          className="button button--primary"
+          type="button"
+          onClick={() => onCreate(displayName())}
+        >
           Create a room
         </button>
 
