@@ -53,6 +53,21 @@ npm run db:setup -w @cce/server
 npm run dev
 ```
 
+### The three-instance stack
+
+`npm run dev` is one server. To run the setup Phase 3 is actually about --
+Postgres, Redis and three instances behind nginx on `localhost:8080`:
+
+```bash
+npm run stack:up
+VITE_WS_URL=ws://localhost:8080 npm run dev -w @cce/web
+npm run stack:logs   # follow all three instances
+npm run stack:down
+```
+
+Open two tabs. nginx round-robins, so they land on different instances, and the
+instance id in each server log line shows which.
+
 ---
 
 ## Phase 1 — single-node sync
@@ -347,3 +362,68 @@ document is the state request. `redis-bus.test.ts` runs the same scenarios
 through a real broker to prove the framing survives the round trip and that an
 instance ignores the copy of its own publish that Redis hands back. It skips
 unless `TEST_REDIS_URL` is set.
+
+---
+
+## Phase 3b — three instances behind nginx
+
+[`infra/docker-compose.yml`](infra/docker-compose.yml) runs Postgres, Redis and
+three copies of the server behind nginx. It exists because a single instance
+cannot demonstrate the thing Phase 3a built: with one server, the Redis path is
+dead code that always agrees with itself.
+
+### Round robin on purpose
+
+nginx balances round robin rather than pinning each client to an instance with
+`ip_hash`. Sticky sessions would be defensible — they save cold room loads, since
+a reconnecting client finds its document already in memory. They are not used
+here because relying on stickiness hides the failure it is papering over. If the
+system only works while every client stays on one instance, then it does not work
+when that instance restarts, and finding that out during a deploy is worse than
+paying for a room load.
+
+So the default path is the hard one: three clients on three instances, sharing a
+document through Redis, and a reconnect that lands anywhere.
+
+### The two lines that make WebSockets work
+
+```nginx
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection "upgrade";
+```
+
+Plus `proxy_http_version 1.1`, because the upgrade handshake does not exist in
+1.0. Without these nginx answers the upgrade request as an ordinary GET and the
+connection never becomes a socket — the most common way a proxy silently breaks
+a WebSocket deployment.
+
+The other one is `proxy_read_timeout`. It defaults to 60 seconds, and a
+collaborative session is mostly silence, so an editor left open would be
+disconnected roughly every minute. It is set to an hour here; the server's
+30 second heartbeat is what keeps a genuinely idle connection from ever reaching
+that.
+
+### Shared secret, unshared identity
+
+`AUTH_SECRET` is identical on all three instances, because a token issued by
+whichever instance answered `POST /api/session` has to verify on whichever
+instance the load balancer picks for the socket. `INSTANCE_ID` is the opposite:
+it must differ, since it is how an instance recognises the echo of its own
+publishes on the bus, and two instances sharing one would ignore each other's
+traffic.
+
+### Verified against the running stack
+
+Three clients through nginx that landed on three different instances (confirmed
+in the logs), all editing the same document:
+
+```
+b text  : "typed through nginx"
+c text  : "typed through nginx"
+a peers : [ 'heron', 'stoat' ]
+converged: true "[b] typed{c} through nginx [a]"
+a peers after b leaves: [ 'stoat' ]
+```
+
+And after `docker compose restart server-1 server-2 server-3`, a fresh client
+reading the same document gets `"survives a rolling restart"` back from Postgres.

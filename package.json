@@ -13,7 +13,10 @@
     "dev": "npm run build -w @cce/protocol && (npm run dev -w @cce/server & npm run dev -w @cce/web)",
     "build": "npm run build -w @cce/protocol && npm run build -w @cce/server && npm run build -w @cce/web",
     "typecheck": "tsc -b",
-    "test": "npm run test -w @cce/server"
+    "test": "npm run test -w @cce/server",
+    "stack:up": "docker compose -f infra/docker-compose.yml up --build -d",
+    "stack:down": "docker compose -f infra/docker-compose.yml down",
+    "stack:logs": "docker compose -f infra/docker-compose.yml logs -f server-1 server-2 server-3"
   },
   "devDependencies": {
     "typescript": "^5.6.3"
