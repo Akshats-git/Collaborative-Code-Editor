@@ -7,11 +7,10 @@ interface Entry {
 }
 
 /**
- * The same contract as the Postgres store, kept in process memory.
- *
- * This exists so `npm run dev` and the test suite need no database. It is not a
- * cache in front of Postgres and it is not durable -- when DATABASE_URL is unset
- * the server simply has no durability, and says so on startup.
+ * The same contract as the Postgres store, kept in process memory, so that
+ * `npm run dev` and the test suite need no database. It is not a cache in front
+ * of Postgres: with DATABASE_URL unset the server has no durability at all, and
+ * says so on startup.
  */
 export class MemoryDocumentStore implements DocumentStore {
   private readonly documents = new Map<string, Entry>();
@@ -47,7 +46,7 @@ export class MemoryDocumentStore implements DocumentStore {
   }
 
   async close(): Promise<void> {
-    // Nothing to release. The map's lifetime is the process, which is what lets
-    // a test restart the server around a store and still find its documents.
+    // Nothing to release. The map lives as long as the process, which is what
+    // lets a test restart the server around a store and still find its documents.
   }
 }

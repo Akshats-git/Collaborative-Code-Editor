@@ -4,12 +4,10 @@ import { logger } from '../logger.js';
 import type { DocumentStore, LoadedDocument } from './store.js';
 
 /**
- * Snapshot + append-only log, in Postgres.
- *
- * Storing one row per update keeps writes cheap and contention-free: appending
- * never reads, never locks, and never conflicts with another instance writing
- * the same document. The cost is that replaying a long-lived document means
- * reading thousands of rows, which is what compaction exists to fix.
+ * Snapshot plus append-only log. One row per update keeps writes cheap and
+ * contention free, since appending never reads, never locks and never conflicts
+ * with another instance. The cost is that replaying a long-lived document means
+ * reading thousands of rows, which is what compaction fixes.
  */
 export class PostgresDocumentStore implements DocumentStore {
   private readonly pool: pg.Pool;
@@ -65,14 +63,13 @@ export class PostgresDocumentStore implements DocumentStore {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
-      await client.query(
-        'insert into documents (id) values ($1) on conflict (id) do nothing',
-        [documentId],
-      );
-      await client.query(
-        'insert into document_updates (document_id, payload) values ($1, $2)',
-        [documentId, Buffer.from(update)],
-      );
+      await client.query('insert into documents (id) values ($1) on conflict (id) do nothing', [
+        documentId,
+      ]);
+      await client.query('insert into document_updates (document_id, payload) values ($1, $2)', [
+        documentId,
+        Buffer.from(update),
+      ]);
       await client.query('commit');
     } catch (error) {
       await client.query('rollback').catch(() => {});
@@ -87,8 +84,8 @@ export class PostgresDocumentStore implements DocumentStore {
     try {
       await client.query('begin');
 
-      // Only one instance should compact a given document at a time. The lock is
-      // released when the transaction ends, however it ends.
+      // Only one instance should compact a given document at a time. The lock
+      // is released when the transaction ends, however it ends.
       await client.query('select pg_advisory_xact_lock(hashtext($1))', [documentId]);
 
       const cutoff = await client.query<{ through_seq: string | null }>(
@@ -101,9 +98,9 @@ export class PostgresDocumentStore implements DocumentStore {
         return 0;
       }
 
-      // Deliberately rebuilt from what is in the database rather than from the
-      // in-memory document: another instance may have appended updates this
-      // process has never seen, and those must survive the truncation.
+      // Rebuilt from what is in the database rather than from the in-memory
+      // document, because another instance may have appended updates this
+      // process has never seen and those must survive the truncation.
       const snapshot = await client.query<{ state: Buffer }>(
         'select state from document_snapshots where document_id = $1',
         [documentId],

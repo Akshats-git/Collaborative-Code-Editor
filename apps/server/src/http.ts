@@ -3,17 +3,29 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join, normalize, sep, extname } from 'node:path';
-import { issueToken } from './auth/index.js';
+import { issueToken } from './auth.js';
 import { config } from './config.js';
 import type { Gateway } from './ws/gateway.js';
 
 const MAX_BODY_BYTES = 1024;
 
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.map': 'application/json; charset=utf-8',
+};
+
 /**
- * The HTTP surface next to the WebSocket server: a health endpoint for Render's
- * checks, the endpoint that hands out session tokens, and -- when a build is
- * present -- the web app itself. Serving the client from the process that holds
- * its sockets open collapses the deployment to one service on one origin.
+ * The HTTP surface next to the WebSocket server: health, session tokens, and
+ * the web app itself when a build is present. Serving the client from the
+ * process that holds its sockets collapses the deployment to one origin.
  */
 export function createHttpServer(gateway: Gateway) {
   return createServer((request: IncomingMessage, response: ServerResponse) => {
@@ -48,19 +60,6 @@ export function createHttpServer(gateway: Gateway) {
   });
 }
 
-const MIME_TYPES: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2',
-  '.map': 'application/json; charset=utf-8',
-};
-
 /**
  * Serves the built client, falling back to index.html for anything that is not
  * a file on disk: the client is a single page and resolves its own routes.
@@ -70,7 +69,7 @@ async function serveApp(urlPath: string, response: ServerResponse): Promise<void
   let file = join(root, normalize(decodeURIComponent(urlPath)));
 
   // `normalize` collapses `..`, so a path that still escapes the root was
-  // trying to; treat it as a miss rather than an error and serve the page.
+  // trying to. Treat it as a miss rather than an error and serve the page.
   if (!file.startsWith(root + sep) || !(await isFile(file))) {
     file = join(root, 'index.html');
     if (!(await isFile(file))) {
@@ -98,13 +97,10 @@ async function isFile(path: string): Promise<boolean> {
 }
 
 /**
- * Issues a session token.
- *
- * There is no account system: this hands a token to whoever asks for one, and
- * the display name is whatever they typed. What it establishes is the
- * *mechanism* -- a signed, short-lived, verifiable credential that the socket
- * demands before joining a room. Putting a real identity provider behind it
- * means changing this function and nothing else.
+ * Issues a session token to whoever asks, since there is no account system.
+ * What it establishes is the mechanism: a signed, short lived credential the
+ * socket demands before joining a room. A real identity provider would mean
+ * changing this function and nothing else.
  */
 async function createSession(request: IncomingMessage, response: ServerResponse): Promise<void> {
   let body: { name?: unknown };

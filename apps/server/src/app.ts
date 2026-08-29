@@ -14,22 +14,16 @@ export interface App {
 }
 
 export interface AppOptions {
-  /**
-   * Overridable so tests can run against an in-memory store. A store passed in
-   * here belongs to the caller and is left open when the app shuts down.
-   */
+  /** Overridable for tests. A store passed in here is left open on shutdown. */
   store?: DocumentStore;
-  /**
-   * Same ownership rule as `store`. Tests use this to run two apps against one
-   * in-process bus, which is what a pair of instances behind nginx looks like.
-   */
+  /** Same ownership rule as `store`. Two apps on one bus look like two instances. */
   bus?: DocumentBus;
 }
 
 /**
  * Wires the store, the room registry and the WebSocket gateway together and
- * hands back start/stop controls. Keeping this separate from `index.ts` means
- * tests can run a real server on an ephemeral port instead of mocking transport.
+ * hands back start and stop controls. Keeping this out of `index.ts` lets tests
+ * run a real server on an ephemeral port instead of mocking transport.
  */
 export function createApp(options: AppOptions = {}): App {
   const store = options.store ?? createDocumentStore();
@@ -58,7 +52,7 @@ export function createApp(options: AppOptions = {}): App {
     },
 
     async close() {
-      // Order matters: stop accepting frames, flush every room, then drop the
+      // Order matters. Stop accepting frames, flush every room, then drop the
       // connection pool. Reversing it would throw away unwritten updates.
       await gateway.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));

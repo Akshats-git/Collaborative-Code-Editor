@@ -19,12 +19,12 @@ export class Gateway {
 
   constructor(private readonly rooms: RoomRegistry) {}
 
-  start(): void {
-    this.heartbeat.start();
-  }
-
   get stats(): { connections: number; rooms: number } {
     return { connections: this.clients.size, rooms: this.rooms.openRooms };
+  }
+
+  start(): void {
+    this.heartbeat.start();
   }
 
   /**

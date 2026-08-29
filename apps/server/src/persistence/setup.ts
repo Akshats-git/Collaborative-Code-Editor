@@ -5,7 +5,7 @@ import { config } from '../config.js';
 
 /**
  * Applies sql/schema.sql. Every statement is `if not exists`, so running this
- * repeatedly is harmless -- which is all the migration tooling three tables and
+ * repeatedly is harmless, which is all the migration tooling three tables and
  * one index justify.
  */
 const schemaPath = fileURLToPath(new URL('../../sql/schema.sql', import.meta.url));

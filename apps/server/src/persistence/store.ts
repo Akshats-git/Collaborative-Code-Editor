@@ -19,21 +19,15 @@ export interface DocumentStore {
 /**
  * Receives every update a room produces and is responsible for getting it into
  * the store. Rooms depend on this rather than on the store directly, so a room
- * can be tested without any persistence at all.
+ * can be tested with no persistence at all.
  */
 export interface UpdateSink {
   record(update: Uint8Array): void;
-  flush(): Promise<void>;
-  /**
-   * Final flush. Unlike `flush`, a failure here is not retried -- there is
-   * nothing left to retry into, and rescheduling would keep the process alive
-   * forever against a store that is not coming back.
-   */
+  /** Final flush. A failure here is not retried, because nothing would be left to retry into. */
   close(): Promise<void>;
 }
 
 export const NO_PERSISTENCE: UpdateSink = {
   record() {},
-  async flush() {},
   async close() {},
 };

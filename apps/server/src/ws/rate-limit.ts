@@ -1,11 +1,9 @@
 /**
  * A token bucket. Refill is computed from the clock on each call rather than
- * driven by a timer, so a thousand connections cost a thousand numbers and no
- * scheduled work.
+ * driven by a timer, so a thousand connections cost a thousand numbers.
  *
- * Chosen over a fixed window because a fixed window lets a client spend its
- * whole allowance in the last millisecond of one window and again in the first
- * millisecond of the next -- twice the intended rate, arriving as one burst.
+ * A fixed window would let a client spend its whole allowance at the end of one
+ * window and again at the start of the next, as one burst at twice the rate.
  */
 export class TokenBucket {
   private tokens: number;

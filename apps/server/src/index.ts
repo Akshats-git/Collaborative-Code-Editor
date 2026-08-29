@@ -3,10 +3,9 @@ import { config } from './config.js';
 import { logger } from './logger.js';
 
 if (!config.auth.secret) {
-  // Locally this is a convenience: a random key per process is fine when there
-  // is one process. In production it means every restart invalidates every
-  // token and no two instances agree on anything, which is worth refusing to
-  // start over rather than discovering from a support ticket.
+  // A random key per process is fine when there is one process. In production
+  // it means every restart invalidates every token and no two instances agree
+  // on anything, which is better to refuse than to debug from a support ticket.
   if (config.isProduction) {
     logger.error('AUTH_SECRET must be set in production');
     process.exit(1);

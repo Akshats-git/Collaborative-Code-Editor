@@ -2,13 +2,11 @@ import { logger } from '../logger.js';
 import type { Client } from './client.js';
 
 /**
- * TCP will happily keep a socket "open" long after the peer has vanished --
- * laptop lid closed, phone off wifi, load balancer dropped the flow. Without a
+ * TCP keeps a socket open long after the peer has vanished, so without a
  * liveness probe those connections sit in memory forever and their cursors stay
- * on everyone else's screen.
- *
- * This uses the WebSocket protocol's own ping/pong control frames rather than an
- * application message, because browsers answer them automatically.
+ * on everyone else's screen. This uses the protocol's own ping and pong control
+ * frames rather than an application message, because browsers answer them
+ * automatically.
  */
 export class Heartbeat {
   private timer: NodeJS.Timeout | undefined;
@@ -32,8 +30,8 @@ export class Heartbeat {
   private sweep(): void {
     for (const client of this.clients) {
       if (!client.alive) {
-        // No pong since the previous sweep. terminate(), not close(): a dead peer
-        // will never complete the closing handshake.
+        // No pong since the previous sweep. terminate() rather than close(),
+        // because a dead peer will never complete the closing handshake.
         logger.warn('terminating unresponsive client', {
           clientId: client.id,
           documentId: client.documentId,

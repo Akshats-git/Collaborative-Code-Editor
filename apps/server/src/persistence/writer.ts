@@ -12,16 +12,11 @@ export interface WriterOptions {
 }
 
 /**
- * Batches a room's updates on their way to the store.
+ * Batches a room's updates on their way to the store, so a burst of typing
+ * becomes one row instead of one insert per character per editor.
  *
- * Writing every keystroke straight through would mean one insert per character
- * per editor, which a free-tier Postgres will not enjoy. Instead updates are
- * merged in memory and flushed after a short quiet period, so a burst of typing
- * becomes one row.
- *
- * The durability this buys is explicit: a hard crash loses at most `debounceMs`
- * of edits. SIGTERM and the last client leaving both flush first, so an ordinary
- * restart or deploy loses nothing.
+ * A hard crash loses at most `debounceMs` of edits. SIGTERM and the last client
+ * leaving both flush first, so an ordinary restart loses nothing.
  */
 export class DocumentWriter implements UpdateSink {
   private pending: Uint8Array[] = [];
@@ -50,7 +45,12 @@ export class DocumentWriter implements UpdateSink {
     this.schedule();
   }
 
-  flush(): Promise<void> {
+  async close(): Promise<void> {
+    this.closed = true;
+    await this.flush();
+  }
+
+  private flush(): Promise<void> {
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = undefined;
@@ -63,11 +63,6 @@ export class DocumentWriter implements UpdateSink {
 
     this.queue = this.queue.then(() => this.write(batch));
     return this.queue;
-  }
-
-  async close(): Promise<void> {
-    this.closed = true;
-    await this.flush();
   }
 
   /**
@@ -90,7 +85,7 @@ export class DocumentWriter implements UpdateSink {
       const message = error instanceof Error ? error.message : String(error);
 
       if (this.closed) {
-        // Shutting down and the store is unreachable. This is data loss, and it
+        // Shutting down and the store is unreachable. This is data loss and it
         // should be loud, but retrying here would hang the process.
         logger.error('dropping updates, store unreachable during shutdown', {
           documentId: this.documentId,
@@ -106,7 +101,7 @@ export class DocumentWriter implements UpdateSink {
         error: message,
       });
 
-      // Safe to push back on the end rather than the front: Yjs updates commute,
+      // Safe to push onto the end rather than the front. Yjs updates commute,
       // so the batch does not need to keep its position in the queue.
       this.pending.push(merged);
       this.pendingBytes += merged.byteLength;

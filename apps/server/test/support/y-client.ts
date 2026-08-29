@@ -4,10 +4,16 @@ import { WebSocket } from 'ws';
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness';
 import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
-import { MessageType, decodeMessage, encodeMessage } from '@cce/protocol';
-import { issueToken } from '../../src/auth/index.js';
+import { MessageType, decodeMessage, encodeMessage, type Message } from '@cce/protocol';
+import { issueToken } from '../../src/auth.js';
 
 const REMOTE = 'remote';
+
+interface AwarenessChange {
+  added: number[];
+  updated: number[];
+  removed: number[];
+}
 
 /** Tokens are signed in-process, so tests do not need the HTTP endpoint. */
 export function testToken(name = 'tester'): string {
@@ -31,7 +37,7 @@ export class TestClient {
     private readonly token: string,
   ) {
     this.awareness = new Awareness(this.doc);
-    this.awareness.on('update', (change: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) => {
+    this.awareness.on('update', (change: AwarenessChange, origin: unknown) => {
       if (origin === REMOTE) return;
       const changed = [...change.added, ...change.updated, ...change.removed];
       this.send({
@@ -124,7 +130,7 @@ export class TestClient {
     this.send({ type: MessageType.Sync, payload });
   }
 
-  private send(message: Parameters<typeof encodeMessage>[0]): void {
+  private send(message: Message): void {
     if (this.socket?.readyState !== WebSocket.OPEN) return;
     this.socket.send(encodeMessage(message));
   }

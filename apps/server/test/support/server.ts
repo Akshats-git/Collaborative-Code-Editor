@@ -24,8 +24,8 @@ export async function withServer<T>(
 }
 
 /**
- * Two instances sharing one store and one bus -- what a pair of servers behind
- * nginx looks like, minus the network.
+ * Two instances sharing one store and one bus. That is what a pair of servers
+ * behind nginx looks like, minus the network.
  */
 export async function withCluster<T>(
   store: DocumentStore,

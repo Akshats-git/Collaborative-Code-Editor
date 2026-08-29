@@ -4,29 +4,30 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import { MessageType, encodeMessage } from '@cce/protocol';
-import { BusKind, EMPTY_PAYLOAD, NO_BUS, type BusMessage, type DocumentBus } from '../cluster/index.js';
-import { NO_PERSISTENCE, type UpdateSink } from '../persistence/store.js';
+import {
+  BusKind,
+  EMPTY_PAYLOAD,
+  NO_BUS,
+  type BusMessage,
+  type DocumentBus,
+} from '../cluster/index.js';
+import { NO_PERSISTENCE, type UpdateSink } from '../persistence/index.js';
 import { Client } from '../ws/client.js';
 
-/**
- * Transaction origin used when replaying stored state into a fresh document, so
- * the writer does not immediately persist what it just read back.
- */
+/** Origin for stored state being replayed, so the writer does not save it again. */
 const HYDRATE = Symbol('hydrate');
 
 /**
- * Transaction origin for anything that arrived from another instance. Such an
- * update still has to reach the clients on this instance, but it must not be
- * published back onto the bus, and it is not ours to persist.
+ * Origin for anything that arrived from another instance. It still has to reach
+ * the clients here, but it must not be published back onto the bus and it is
+ * not ours to persist.
  */
 const REMOTE = Symbol('remote');
 
 /**
- * A room is a document plus everyone currently editing it.
- *
- * Document state and awareness state are deliberately kept on separate paths:
- * the document is durable and must never lose an update, awareness is
- * throwaway presence data that we are free to drop.
+ * A room is a document plus everyone currently editing it. Document state and
+ * awareness state are kept on separate paths on purpose: the document must
+ * never lose an update, while presence is throwaway data we are free to drop.
  */
 export class Room {
   readonly doc = new Y.Doc();
@@ -47,24 +48,20 @@ export class Room {
     this.awareness.on('update', this.onAwarenessUpdate);
   }
 
+  get clientCount(): number {
+    return this.clients.size;
+  }
+
   /** Replays persisted state into an empty room, before any client joins. */
   hydrate(state: Uint8Array): void {
     Y.applyUpdate(this.doc, state, HYDRATE);
   }
 
-  get clientCount(): number {
-    return this.clients.size;
-  }
-
-  get text(): Y.Text {
-    return this.doc.getText('content');
-  }
-
   add(client: Client): void {
     this.clients.add(client);
 
-    // Step 1 of the Yjs sync protocol: "here is what I have, tell me what I am
-    // missing". The client answers with its own step 1 and a step 2 reply.
+    // Step 1 of the Yjs sync protocol: here is what I have, tell me what I am
+    // missing. The client answers with its own step 1 and a step 2 reply.
     const sync = encoding.createEncoder();
     syncProtocol.writeSyncStep1(sync, this.doc);
     client.send(encodeMessage({ type: MessageType.Sync, payload: encoding.toUint8Array(sync) }));
@@ -95,12 +92,14 @@ export class Room {
     const decoder = decoding.createDecoder(payload);
     const encoder = encoding.createEncoder();
 
-    // The client is passed as the transaction origin so the update handler below
-    // can skip echoing the change back to whoever sent it.
+    // The client is the transaction origin so the update handler below can skip
+    // echoing the change back to whoever sent it.
     syncProtocol.readSyncMessage(decoder, encoder, this.doc, client);
 
     if (encoding.length(encoder) > 0) {
-      client.send(encodeMessage({ type: MessageType.Sync, payload: encoding.toUint8Array(encoder) }));
+      client.send(
+        encodeMessage({ type: MessageType.Sync, payload: encoding.toUint8Array(encoder) }),
+      );
     }
   }
 
@@ -130,16 +129,22 @@ export class Room {
     this.bus.publish(this.id, BusKind.StateRequest, EMPTY_PAYLOAD);
   }
 
+  async destroy(): Promise<void> {
+    // Flush first. A graceful shutdown and the last client leaving both take
+    // this path.
+    await this.sink.close();
+
+    this.doc.off('update', this.onDocUpdate);
+    this.awareness.off('update', this.onAwarenessUpdate);
+    this.awareness.destroy();
+    this.doc.destroy();
+  }
+
   /**
-   * Brings an instance that has just opened this document up to date.
-   *
-   * Both halves matter and neither is in Postgres. The document we accepted in
-   * the last few hundred milliseconds is still in our write buffer, so their
-   * read cannot have seen it. Presence is never written at all, so without this
-   * the people already editing stay invisible to whoever joins the new instance
-   * until they next move their cursor.
-   *
-   * The duplicate bytes cost a merge the receiver would have done anyway.
+   * Brings an instance that has just opened this document up to date. Neither
+   * half is in Postgres: recent edits are still in our write buffer, and
+   * presence is never written at all. The duplicate bytes cost a merge the
+   * receiver would have done anyway.
    */
   private answerStateRequest(): void {
     this.bus.publish(this.id, BusKind.Update, Y.encodeStateAsUpdate(this.doc));
@@ -153,21 +158,10 @@ export class Room {
     );
   }
 
-  async destroy(): Promise<void> {
-    // Flush before tearing anything down: this is the path a graceful shutdown
-    // and the last-client-leaves case both take.
-    await this.sink.close();
-
-    this.doc.off('update', this.onDocUpdate);
-    this.awareness.off('update', this.onAwarenessUpdate);
-    this.awareness.destroy();
-    this.doc.destroy();
-  }
-
   private onDocUpdate = (update: Uint8Array, origin: unknown): void => {
     // Replayed state is already stored, and a remote update belongs to the
-    // instance that accepted it -- persisting it here would write the same bytes
-    // once per instance and republishing it would loop.
+    // instance that accepted it. Persisting it here would write the same bytes
+    // once per instance, and republishing it would loop.
     if (origin !== HYDRATE && origin !== REMOTE) {
       this.sink.record(update);
       this.bus.publish(this.id, BusKind.Update, update);
@@ -198,8 +192,8 @@ export class Room {
     const frame = encodeMessage({ type: MessageType.Awareness, payload });
 
     for (const client of this.clients) {
-      // Presence, not document state: droppable, and dropped first when a
-      // client's send buffer starts filling up.
+      // Presence rather than document state, so this is the first thing dropped
+      // when a client's send buffer starts filling up.
       if (client !== origin) client.sendPresence(frame);
     }
   };

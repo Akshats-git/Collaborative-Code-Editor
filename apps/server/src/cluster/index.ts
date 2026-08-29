@@ -4,8 +4,14 @@ import { NO_BUS, type DocumentBus } from './bus.js';
 import { RedisDocumentBus } from './redis-bus.js';
 
 export { NO_BUS, type BusListener, type DocumentBus } from './bus.js';
-export { BusKind, EMPTY_PAYLOAD, type BusKindValue, type BusMessage } from './messages.js';
-export { decodeBusMessage, encodeBusMessage } from './messages.js';
+export {
+  BusKind,
+  EMPTY_PAYLOAD,
+  decodeBusMessage,
+  encodeBusMessage,
+  type BusKindValue,
+  type BusMessage,
+} from './messages.js';
 export { RedisDocumentBus } from './redis-bus.js';
 
 /** Falls back to a single-instance bus when no broker is configured. */

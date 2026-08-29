@@ -16,15 +16,11 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL ?? '',
   /**
    * Identifies this process in logs, and on the bus, where it is how an instance
-   * recognises the echo of its own publishes. Must be unique per instance.
+   * recognises the echo of its own publishes. Must be unique per instance: a pid
+   * only is within one machine, and RENDER_INSTANCE_ID only exists on Render.
    */
   instanceId:
-    process.env.INSTANCE_ID ??
-    // Render exposes this; other hosts will not, and the pid is only unique
-    // within one machine -- so set INSTANCE_ID explicitly anywhere that runs
-    // more than one instance.
-    process.env.RENDER_INSTANCE_ID ??
-    `srv-${process.pid}`,
+    process.env.INSTANCE_ID ?? process.env.RENDER_INSTANCE_ID ?? `srv-${process.pid}`,
   /** Unset means one instance: edits never leave the process that accepted them. */
   redisUrl: process.env.REDIS_URL ?? '',
 
@@ -45,18 +41,13 @@ export const config = {
   corsOrigin: process.env.CORS_ORIGIN ?? '*',
 
   /**
-   * Directory of the built web app. Serving it from the same origin as the API
-   * is what makes a deployment one service and one URL -- and is why CORS_ORIGIN
-   * stops mattering once it is set. Locally this is whatever `npm run build`
-   * last produced -- Vite's dev server on :5173 is the one you actually edit
-   * against. Set WEB_ROOT= to serve nothing.
+   * Directory of the built web app, served from the same origin as the API so
+   * that a deployment is one service and one URL. Locally this is whatever
+   * `npm run build` last produced. Set WEB_ROOT= to serve nothing.
    */
   webRoot: process.env.WEB_ROOT ?? fileURLToPath(new URL('../../web/dist', import.meta.url)),
 
-  /**
-   * Per connection. Bursts are allowed at twice the sustained rate, which is
-   * what a paste or a reconnect resync looks like.
-   */
+  /** Per connection. Bursts are allowed at twice the sustained rate. */
   rateLimit: {
     /** Budget for document traffic. A frame costs at least `minFrameCost`. */
     bytesPerSecond: int('RATE_LIMIT_BYTES_PER_SECOND', 1024 * 1024),
@@ -71,8 +62,7 @@ export const config = {
 
   /**
    * How far behind a client's send buffer may fall before we start protecting
-   * the server from it. Measured in bytes still queued in the kernel and in
-   * `ws`, which is what `bufferedAmount` reports.
+   * the server from it, measured in the bytes `bufferedAmount` reports.
    */
   backpressure: {
     /** Above this, presence updates for that client are dropped. */

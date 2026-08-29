@@ -9,17 +9,13 @@ const CHANNEL_PREFIX = 'cce:doc:';
 const ERROR_LOG_INTERVAL_MS = 10_000;
 
 /**
- * Fans document traffic out across instances over Redis pub/sub.
+ * Fans document traffic out across instances over Redis pub/sub. Two
+ * connections, because a client in subscriber mode may not issue ordinary
+ * commands.
  *
- * Two connections, because a Redis client in subscriber mode may not issue
- * ordinary commands -- one holds the subscriptions, the other publishes.
- *
- * Redis is treated as a relay, never as a source of truth. Nothing here is
- * stored and nothing is replayed: if the broker is unreachable, each instance
- * keeps serving the clients connected to it and only cross-instance edits stop
- * flowing. That is a real degradation, but it is a partition rather than an
- * outage, and it heals on its own -- see `Room`'s state request, which every
- * instance issues when it reopens a document.
+ * Redis is a relay here, never a source of truth. An unreachable broker is a
+ * partition rather than an outage: each instance keeps serving its own clients,
+ * and rooms reconverge through the state request issued on reopening.
  */
 export class RedisDocumentBus implements DocumentBus {
   private readonly publisher: Redis;
@@ -31,12 +27,12 @@ export class RedisDocumentBus implements DocumentBus {
     url: string,
     private readonly instanceId: string,
   ) {
-    // Fail publishes fast instead of queueing them: a queued document update is
+    // Fail publishes fast instead of queueing them. A queued document update is
     // one that arrives out of order minutes later, which is worse than one that
-    // never arrives, since the room is converged again by then.
+    // never arrives, since the room has converged again by then.
     this.publisher = new Redis(url, { enableOfflineQueue: false, maxRetriesPerRequest: 1 });
-    // The subscriber keeps its queue: ioredis replays SUBSCRIBE on reconnect, so
-    // a room that outlives an outage gets its channel back without our help.
+    // The subscriber keeps its queue. ioredis replays SUBSCRIBE on reconnect,
+    // so a room that outlives an outage gets its channel back without our help.
     this.subscriber = new Redis(url);
 
     this.publisher.on('error', (error) => this.onError('publisher', error));
@@ -54,7 +50,7 @@ export class RedisDocumentBus implements DocumentBus {
     try {
       await this.subscriber.subscribe(channel);
     } catch (error) {
-      // Not fatal: the room still works locally, and ioredis subscribes for us
+      // Not fatal. The room still works locally, and ioredis subscribes for us
       // once the connection is back.
       this.onError('subscribe', error);
     }
@@ -94,8 +90,8 @@ export class RedisDocumentBus implements DocumentBus {
       return;
     }
 
-    // Redis delivers our own publishes back to us. Applying them would be
-    // harmless -- Yjs updates are idempotent -- but it doubles the work.
+    // Redis delivers our own publishes back to us. Applying them is harmless,
+    // since Yjs updates are idempotent, but it doubles the work.
     if (message.origin === this.instanceId) return;
 
     listener(message);
@@ -115,10 +111,10 @@ export class RedisDocumentBus implements DocumentBus {
 }
 
 /**
- * QUIT drains anything in flight, but it only completes while we are connected:
- * on a client that never reached the broker it sits in the offline queue
- * forever. `disconnect` is the half that actually stops the reconnect loop, and
- * without it a process that started with Redis down never exits.
+ * QUIT drains anything in flight but only completes while connected, so on a
+ * client that never reached the broker it queues forever. `disconnect` is what
+ * stops the reconnect loop, without which a process started with Redis down
+ * never exits.
  */
 async function shutdown(client: Redis): Promise<void> {
   if (client.status === 'ready') await client.quit();

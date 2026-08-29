@@ -5,11 +5,9 @@ import type { Client } from '../ws/client.js';
 import { Room } from './room.js';
 
 /**
- * Owns the lifetime of every in-memory room.
- *
- * A room is loaded from the store on the first join and dropped when the last
- * client leaves, so an idle instance holds no documents. The trade is that a
- * document nobody is editing costs a read to reopen.
+ * Owns the lifetime of every in-memory room. A room is loaded on the first join
+ * and dropped when the last client leaves, so an idle instance holds no
+ * documents and a quiet document costs a read to reopen.
  */
 export class RoomRegistry {
   private readonly rooms = new Map<string, Room>();
@@ -77,8 +75,8 @@ export class RoomRegistry {
 
     this.rooms.set(documentId, room);
 
-    // The store is not the whole truth: an instance that already has this
-    // document open may be holding updates that have not been written yet.
+    // The store is not the whole truth. An instance that already has this
+    // document open may be holding updates it has not written yet.
     room.requestState();
     logger.info('room opened', {
       documentId,

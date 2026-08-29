@@ -1,6 +1,6 @@
-import { CloseCode, MessageType, decodeMessage, encodeMessage } from '@cce/protocol';
+import { CloseCode, MessageType, decodeMessage, encodeMessage, type Message } from '@cce/protocol';
 import type { RawData } from 'ws';
-import { verifyToken, type SessionClaims } from '../auth/index.js';
+import { verifyToken, type SessionClaims } from '../auth.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import type { RoomRegistry } from '../rooms/registry.js';
@@ -9,14 +9,14 @@ import type { Client } from './client.js';
 import { TokenBucket } from './rate-limit.js';
 
 /**
- * Frames a client may send between authenticating and its document finishing
- * loading. A well behaved client sends one; the cap stops a hostile one from
- * making us buffer indefinitely behind a slow read.
+ * Frames a client may send while its document is still loading. A well behaved
+ * client sends one, and the cap stops a hostile one from making us buffer
+ * indefinitely behind a slow read.
  */
 const MAX_QUEUED_FRAMES = 32;
 
 /**
- * The state machine for a single socket: unauthenticated -> joining -> joined.
+ * The state machine for a single socket: unauthenticated, joining, joined.
  *
  * No room is touched until a valid token arrives, so an unauthenticated socket
  * costs one timer and nothing else.
@@ -28,9 +28,9 @@ export class Connection {
   private authTimer: NodeJS.Timeout | undefined;
 
   /**
-   * Two budgets, not one, so a client whose cursor is moving constantly cannot
-   * starve its own edits. Both allow a burst of twice the sustained rate, which
-   * is roughly what a paste or a reconnect resync looks like.
+   * Two budgets rather than one, so a client whose cursor is moving constantly
+   * cannot starve its own edits. Both allow a burst of twice the sustained
+   * rate, which is roughly what a paste or a reconnect resync looks like.
    */
   private readonly documentBudget = new TokenBucket(
     config.rateLimit.bytesPerSecond * 2,
@@ -51,7 +51,7 @@ export class Connection {
     const { socket } = this.client;
 
     // A socket that never authenticates would otherwise sit here until the
-    // heartbeat noticed it, which is 30s of free resources.
+    // heartbeat noticed it, which is 30 seconds of free resources.
     this.authTimer = setTimeout(() => {
       logger.warn('closing unauthenticated socket', { clientId: this.client.id });
       this.client.close(CloseCode.Unauthorized, 'authentication timed out');
@@ -104,21 +104,17 @@ export class Connection {
   }
 
   /**
-   * The inbound half of the same rule the outbound side follows: presence is
-   * droppable and document traffic is not.
-   *
-   * A client over its presence budget just loses those frames -- nobody notices
-   * a cursor that skipped an update. A client over its document budget cannot be
-   * treated that way, because it believes the edit was delivered, so the only
-   * answer that leaves it in a correct state is to close the socket and let it
-   * resync from its state vector.
+   * The inbound half of the rule the outbound side follows: presence is
+   * droppable and document traffic is not. A client over its document budget
+   * believes its edit was delivered, so the only answer that leaves it correct
+   * is to close the socket and let it resync from its state vector.
    */
-  private withinLimits(message: ReturnType<typeof decodeMessage>, size: number): boolean {
+  private withinLimits(message: Message, size: number): boolean {
     if (message.type === MessageType.Awareness) {
       return this.presenceBudget.take(1);
     }
-    // Charged a floor per frame, so a thousand one-byte updates cost as much as
-    // the bandwidth they really consume in syscalls and parsing.
+    // Charged a floor per frame, so a thousand one-byte updates cost what they
+    // really consume in syscalls and parsing.
     if (this.documentBudget.take(Math.max(size, config.rateLimit.minFrameCost))) return true;
 
     logger.warn('closing client over its rate limit', {
@@ -174,7 +170,7 @@ export class Connection {
     this.queued.length = 0;
   }
 
-  private dispatch(room: Room, message: ReturnType<typeof decodeMessage>): void {
+  private dispatch(room: Room, message: Message): void {
     switch (message.type) {
       case MessageType.Sync:
         room.handleSync(this.client, message.payload);
@@ -207,7 +203,7 @@ export class Connection {
   }
 }
 
-/** `ws` hands us a Buffer or an array of them; Yjs wants a plain Uint8Array. */
+/** `ws` hands us a Buffer or an array of them. Yjs wants a plain Uint8Array. */
 function toUint8Array(data: RawData): Uint8Array {
   if (Buffer.isBuffer(data)) {
     return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);

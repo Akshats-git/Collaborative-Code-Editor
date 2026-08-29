@@ -3,8 +3,8 @@ import { config } from './config.js';
 type Fields = Record<string, unknown>;
 
 /**
- * One JSON object per line. Render and most log aggregators parse that for free,
- * and it stays greppable when three instances interleave their output.
+ * One JSON object per line. Most log aggregators parse that for free, and it
+ * stays greppable when three instances interleave their output.
  */
 function write(level: 'info' | 'warn' | 'error', message: string, fields?: Fields): void {
   const line = JSON.stringify({

@@ -1,9 +1,7 @@
 /**
- * Framing for messages relayed between server instances.
- *
- * This is a separate wire format from `@cce/protocol`: that one is the contract
- * with browsers, this one is internal and carries a field browsers never need --
- * the id of the instance that sent it, so we can ignore our own echo.
+ * Framing for messages relayed between server instances. Separate from
+ * `@cce/protocol` because it carries a field browsers never need: the id of the
+ * sending instance, so we can ignore our own echo.
  *
  *   [0]        kind
  *   [1]        length of the origin id in bytes
@@ -16,10 +14,7 @@ export const BusKind = {
   Update: 0,
   /** An awareness update: cursors, selections, joins and leaves. */
   Awareness: 1,
-  /**
-   * "I have just opened this document, send me what you have." Answered with an
-   * Update carrying the full state.
-   */
+  /** "I have just opened this document, send me what you have." */
   StateRequest: 2,
 } as const;
 
