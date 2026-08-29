@@ -31,6 +31,16 @@ const PING_INTERVAL_MS = 20_000;
 const PONG_TIMEOUT_MS = 10_000;
 
 /**
+ * y-protocols discards any awareness state it has not heard about for 30
+ * seconds, which is the right default -- it is what stops a client that vanished
+ * without a close frame from haunting everyone else's screen. The cost is that
+ * someone reading rather than typing looks like they left, so we re-announce on
+ * a shorter cycle. It matters more with several instances, where the removal can
+ * also come from a peer that simply never heard the original.
+ */
+const AWARENESS_REFRESH_MS = 10_000;
+
+/**
  * Speaks the Yjs sync and awareness protocols over a single binary WebSocket,
  * and keeps that socket alive across network drops.
  *
@@ -54,6 +64,7 @@ export class CollabProvider {
   private reconnectTimer: number | undefined;
   private pingTimer: number | undefined;
   private pongTimer: number | undefined;
+  private awarenessTimer: number | undefined;
   private destroyed = false;
 
   constructor({ url, doc, awareness, getToken }: CollabProviderOptions) {
@@ -130,6 +141,7 @@ export class CollabProvider {
       }
 
       this.startPinging();
+      this.startAnnouncing();
     };
 
     socket.onmessage = (event: MessageEvent<ArrayBuffer>) => {
@@ -236,6 +248,15 @@ export class CollabProvider {
     }, PING_INTERVAL_MS);
   }
 
+  private startAnnouncing(): void {
+    this.awarenessTimer = window.setInterval(() => {
+      const local = this.awareness.getLocalState();
+      // Re-setting the same state bumps its clock, which is all the other side
+      // needs to keep the entry alive.
+      if (local !== null) this.awareness.setLocalState(local);
+    }, AWARENESS_REFRESH_MS);
+  }
+
   private scheduleReconnect(): void {
     // Exponential backoff with jitter: without the jitter, every client knocked
     // off by one server restart comes back in the same millisecond.
@@ -249,9 +270,11 @@ export class CollabProvider {
   private clearTimers(): void {
     if (this.pingTimer !== undefined) window.clearInterval(this.pingTimer);
     if (this.pongTimer !== undefined) window.clearTimeout(this.pongTimer);
+    if (this.awarenessTimer !== undefined) window.clearInterval(this.awarenessTimer);
     if (this.reconnectTimer !== undefined) window.clearTimeout(this.reconnectTimer);
     this.pingTimer = undefined;
     this.pongTimer = undefined;
+    this.awarenessTimer = undefined;
     this.reconnectTimer = undefined;
   }
 

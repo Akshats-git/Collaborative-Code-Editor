@@ -4,6 +4,7 @@ import * as syncProtocol from 'y-protocols/sync';
 import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import { MessageType, encodeMessage } from '@cce/protocol';
+import { BusKind, EMPTY_PAYLOAD, NO_BUS, type BusMessage, type DocumentBus } from '../cluster/index.js';
 import { NO_PERSISTENCE, type UpdateSink } from '../persistence/store.js';
 import { Client } from '../ws/client.js';
 
@@ -12,6 +13,13 @@ import { Client } from '../ws/client.js';
  * the writer does not immediately persist what it just read back.
  */
 const HYDRATE = Symbol('hydrate');
+
+/**
+ * Transaction origin for anything that arrived from another instance. Such an
+ * update still has to reach the clients on this instance, but it must not be
+ * published back onto the bus, and it is not ours to persist.
+ */
+const REMOTE = Symbol('remote');
 
 /**
  * A room is a document plus everyone currently editing it.
@@ -29,6 +37,7 @@ export class Room {
   constructor(
     readonly id: string,
     private readonly sink: UpdateSink = NO_PERSISTENCE,
+    private readonly bus: DocumentBus = NO_BUS,
   ) {
     this.awareness = new awarenessProtocol.Awareness(this.doc);
     // The server observes presence but is not itself a participant.
@@ -99,6 +108,51 @@ export class Room {
     awarenessProtocol.applyAwarenessUpdate(this.awareness, payload, client);
   }
 
+  /** Applies a message another instance published for this document. */
+  receive(message: BusMessage): void {
+    switch (message.kind) {
+      case BusKind.Update:
+        Y.applyUpdate(this.doc, message.payload, REMOTE);
+        break;
+
+      case BusKind.Awareness:
+        awarenessProtocol.applyAwarenessUpdate(this.awareness, message.payload, REMOTE);
+        break;
+
+      case BusKind.StateRequest:
+        if (this.clientCount > 0) this.answerStateRequest();
+        break;
+    }
+  }
+
+  /** Asks any instance already holding this document for what it has. */
+  requestState(): void {
+    this.bus.publish(this.id, BusKind.StateRequest, EMPTY_PAYLOAD);
+  }
+
+  /**
+   * Brings an instance that has just opened this document up to date.
+   *
+   * Both halves matter and neither is in Postgres. The document we accepted in
+   * the last few hundred milliseconds is still in our write buffer, so their
+   * read cannot have seen it. Presence is never written at all, so without this
+   * the people already editing stay invisible to whoever joins the new instance
+   * until they next move their cursor.
+   *
+   * The duplicate bytes cost a merge the receiver would have done anyway.
+   */
+  private answerStateRequest(): void {
+    this.bus.publish(this.id, BusKind.Update, Y.encodeStateAsUpdate(this.doc));
+
+    const states = this.awareness.getStates();
+    if (states.size === 0) return;
+    this.bus.publish(
+      this.id,
+      BusKind.Awareness,
+      awarenessProtocol.encodeAwarenessUpdate(this.awareness, [...states.keys()]),
+    );
+  }
+
   async destroy(): Promise<void> {
     // Flush before tearing anything down: this is the path a graceful shutdown
     // and the last-client-leaves case both take.
@@ -111,7 +165,13 @@ export class Room {
   }
 
   private onDocUpdate = (update: Uint8Array, origin: unknown): void => {
-    if (origin !== HYDRATE) this.sink.record(update);
+    // Replayed state is already stored, and a remote update belongs to the
+    // instance that accepted it -- persisting it here would write the same bytes
+    // once per instance and republishing it would loop.
+    if (origin !== HYDRATE && origin !== REMOTE) {
+      this.sink.record(update);
+      this.bus.publish(this.id, BusKind.Update, update);
+    }
 
     const encoder = encoding.createEncoder();
     syncProtocol.writeUpdate(encoder, update);
@@ -132,10 +192,10 @@ export class Room {
     }
 
     const changed = [...change.added, ...change.updated, ...change.removed];
-    const frame = encodeMessage({
-      type: MessageType.Awareness,
-      payload: awarenessProtocol.encodeAwarenessUpdate(this.awareness, changed),
-    });
+    const payload = awarenessProtocol.encodeAwarenessUpdate(this.awareness, changed);
+    if (origin !== REMOTE) this.bus.publish(this.id, BusKind.Awareness, payload);
+
+    const frame = encodeMessage({ type: MessageType.Awareness, payload });
 
     for (const client of this.clients) {
       if (client !== origin) client.send(frame);

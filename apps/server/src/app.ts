@@ -1,4 +1,5 @@
 import type { Server } from 'node:http';
+import { createDocumentBus, type DocumentBus } from './cluster/index.js';
 import { config } from './config.js';
 import { createHttpServer } from './http.js';
 import { logger } from './logger.js';
@@ -18,6 +19,11 @@ export interface AppOptions {
    * here belongs to the caller and is left open when the app shuts down.
    */
   store?: DocumentStore;
+  /**
+   * Same ownership rule as `store`. Tests use this to run two apps against one
+   * in-process bus, which is what a pair of instances behind nginx looks like.
+   */
+  bus?: DocumentBus;
 }
 
 /**
@@ -28,7 +34,9 @@ export interface AppOptions {
 export function createApp(options: AppOptions = {}): App {
   const store = options.store ?? createDocumentStore();
   const ownsStore = options.store === undefined;
-  const rooms = new RoomRegistry(store, config.persistence);
+  const bus = options.bus ?? createDocumentBus();
+  const ownsBus = options.bus === undefined;
+  const rooms = new RoomRegistry(store, config.persistence, bus);
   const gateway = new Gateway(rooms);
   const server: Server = createHttpServer(gateway);
 
@@ -54,6 +62,7 @@ export function createApp(options: AppOptions = {}): App {
       // connection pool. Reversing it would throw away unwritten updates.
       await gateway.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
+      if (ownsBus) await bus.close();
       if (ownsStore) await store.close();
     },
   };

@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@cce/protocol": "*",
+    "ioredis": "^6.0.0",
     "lib0": "^0.2.98",
     "pg": "^8.23.0",
     "ws": "^8.18.0",

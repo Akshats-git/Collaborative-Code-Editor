@@ -256,3 +256,94 @@ update; presence is disposable and must never outlive its connection.** They get
 opposite treatment everywhere — different message types, different broadcast
 paths, and only one of them is written down. `npm test` asserts that a
 document's stored state comes back with the text and none of the cursors.
+
+---
+
+## Phase 3a — more than one server
+
+A WebSocket connection is state pinned to one process. Two people editing the
+same document land on different instances behind a load balancer, and by default
+neither ever hears the other.
+
+Every room subscribes to a Redis channel named after its document. A local edit
+is broadcast to the sockets on this instance and published to that channel; an
+instance that receives one applies it to its copy of the document, which fans it
+out to its own sockets by the same path a local edit takes.
+
+```
+browser ──▶ instance A ──┐                      ┌──▶ browser
+                         ├── redis cce:doc:x ───┤
+browser ──▶ instance C ──┘                      └──▶ browser
+```
+
+### Why this is a relay and not a queue
+
+Nothing on the bus is stored, acknowledged or replayed. Redis here is a fanout
+mechanism, not a source of truth — Postgres is. That is what makes the failure
+mode survivable: if Redis is unreachable, each instance keeps serving the clients
+connected to it, and only cross-instance traffic stops. A partition, not an
+outage.
+
+It also means a dropped message is not a lost edit. The bus carries CRDT updates,
+which are commutative and idempotent, so a client that missed one converges the
+moment it receives any later state that contains it.
+
+This is the argument for CRDTs over OT, cashed in. Operational transform needs a
+single authoritative point that sees every operation in order to transform
+against — which is exactly the thing three interchangeable instances do not have.
+Yjs pushes the merge rule into the data structure, so relaying is enough and
+ordering is not our problem.
+
+### One channel per document
+
+Not one channel for everything: an instance holding three documents should not
+have to decode traffic for the other thousand. Rooms already appear and disappear
+with their last client, so subscribing and unsubscribing along with them costs
+nothing extra.
+
+### Who writes to Postgres
+
+An update is persisted by the instance that accepted it, and not by the instances
+that receive it over the bus. Recording it everywhere would write the same bytes
+once per instance and trigger compaction that many times sooner.
+
+The trade is real and worth stating: if the accepting instance dies inside its
+write-debounce window, its peers hold that edit in memory but will not save it.
+That is the same bounded loss Phase 2a already documented, now with a second way
+to reach it. Making it airtight needs the peers to take over persistence for a
+dead instance, which needs leader election, which needs a failure story of its
+own. Not worth it here.
+
+### Why a new instance cannot trust the database
+
+When an instance opens a document nobody there was editing, it reads from
+Postgres — and that read is stale by construction, because the instances already
+holding the document have accepted updates that are still in their write buffers.
+Presence is worse: it is never written down at all, so a database read says the
+room is empty even when four people are in it.
+
+So opening a room publishes a state request, and every instance already holding
+that document answers with its full state and its current awareness. Redundant
+bytes, but they cost the receiver a merge it was going to do anyway, and it
+closes the window between reading storage and subscribing to the channel.
+
+### Shutting down when Redis is not there
+
+`QUIT` only completes while connected; on a client that never reached the broker
+it sits in the offline queue forever. Stopping the reconnect loop takes
+`disconnect()`, and without it a server that starts with Redis down will not exit
+on `SIGTERM` — a container that has to be killed rather than one that drains.
+Found by running it, not by reading it.
+
+Two Redis connections, not one: a client in subscriber mode may not issue
+ordinary commands, so publishing needs its own.
+
+### Testing this
+
+`cluster.test.ts` runs several instances in one process against an in-process
+bus, which is enough to prove the room logic — including one test where the store
+deliberately keeps nothing, so the only way the second instance can have the
+document is the state request. `redis-bus.test.ts` runs the same scenarios
+through a real broker to prove the framing survives the round trip and that an
+instance ignores the copy of its own publish that Redis hands back. It skips
+unless `TEST_REDIS_URL` is set.

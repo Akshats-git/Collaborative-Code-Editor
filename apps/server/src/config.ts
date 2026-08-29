@@ -10,8 +10,13 @@ export const config = {
   port: int('PORT', 8080),
   /** Unset means no durability: documents live only as long as the process. */
   databaseUrl: process.env.DATABASE_URL ?? '',
-  /** Identifies this process in logs. Useful once several instances are running. */
+  /**
+   * Identifies this process in logs, and on the bus, where it is how an instance
+   * recognises the echo of its own publishes. Must be unique per instance.
+   */
   instanceId: process.env.INSTANCE_ID ?? `srv-${process.pid}`,
+  /** Unset means one instance: edits never leave the process that accepted them. */
+  redisUrl: process.env.REDIS_URL ?? '',
 
   heartbeat: {
     /** How often the server pings each socket. */

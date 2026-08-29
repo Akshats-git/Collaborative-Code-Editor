@@ -1,3 +1,4 @@
+import { NO_BUS, type DocumentBus } from '../cluster/index.js';
 import { logger } from '../logger.js';
 import { DocumentWriter, type DocumentStore, type WriterOptions } from '../persistence/index.js';
 import type { Client } from '../ws/client.js';
@@ -18,6 +19,7 @@ export class RoomRegistry {
   constructor(
     private readonly store: DocumentStore,
     private readonly writerOptions: WriterOptions,
+    private readonly bus: DocumentBus = NO_BUS,
   ) {}
 
   get openRooms(): number {
@@ -35,6 +37,7 @@ export class RoomRegistry {
     if (room.clientCount > 0) return;
 
     this.rooms.delete(room.id);
+    await this.bus.unsubscribe(room.id);
     await room.destroy();
     logger.info('room closed', { documentId: room.id });
   }
@@ -43,7 +46,12 @@ export class RoomRegistry {
   async closeAll(): Promise<void> {
     const rooms = [...this.rooms.values()];
     this.rooms.clear();
-    await Promise.all(rooms.map((room) => room.destroy()));
+    await Promise.all(
+      rooms.map(async (room) => {
+        await this.bus.unsubscribe(room.id);
+        await room.destroy();
+      }),
+    );
   }
 
   private open(documentId: string): Promise<Room> {
@@ -60,10 +68,18 @@ export class RoomRegistry {
     const { state, pendingUpdates } = await this.store.load(documentId);
 
     const writer = new DocumentWriter(documentId, this.store, this.writerOptions, pendingUpdates);
-    const room = new Room(documentId, writer);
+    const room = new Room(documentId, writer, this.bus);
+
+    // Subscribe before hydrating, so an edit made on another instance while we
+    // are reading is applied on top of the read rather than lost behind it.
+    await this.bus.subscribe(documentId, (message) => room.receive(message));
     if (state) room.hydrate(state);
 
     this.rooms.set(documentId, room);
+
+    // The store is not the whole truth: an instance that already has this
+    // document open may be holding updates that have not been written yet.
+    room.requestState();
     logger.info('room opened', {
       documentId,
       restored: state !== null,
