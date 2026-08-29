@@ -35,7 +35,8 @@ npm install
 npm run dev          # server on :8080, client on :5173
 ```
 
-Open <http://localhost:5173?doc=demo> in two tabs and type in both.
+Open <http://localhost:5173>, create a room, and paste the link it gives you
+into a second tab. Both tabs are in the same document; type in either.
 
 ```bash
 npm test             # boots a real server and asserts convergence
@@ -217,6 +218,26 @@ available. The alternatives:
 | **First message after connect** | The socket exists before we know who owns it. Bounded with a timeout and a room that is not touched until the token verifies. |
 
 The last one is the only option whose downside is something the server controls.
+
+### Rooms, and what "private" means here
+
+The client is three screens: a lobby, a join gate, and the editor. Creating a
+room mints an unguessable id — 12 characters from a 31-character alphabet, drawn
+with rejection sampling so the alphabet stays uniform — and puts it in the URL as
+`/r/<id>`. Sharing the room is sharing that link.
+
+Opening the link does not open a socket. The gate asks for a name first, and only
+then does the client connect, which means someone who has the link but has not
+joined has not fetched the document either. That is the honest version of "only
+people in the room can edit": not joining means not seeing it, rather than seeing
+it read-only.
+
+What that model *is* is capability-based: the id is the credential, exactly as in
+an "anyone with the link" share. It is not identity. A session token is still
+handed to whoever asks for one and is not scoped to a room, so a leaked link is a
+leaked document, and someone who guesses an id — 2^59 says they will not — would
+be let in. Binding the token to a room id in `createSession` is the next step up,
+and it is a server change rather than a client one.
 
 ### Why the token is hand-rolled and not a JWT library
 

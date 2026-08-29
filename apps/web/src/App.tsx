@@ -5,33 +5,43 @@ import { useCollab } from './collab/useCollab.js';
 import { useDocumentLanguage } from './collab/useDocumentLanguage.js';
 import { useDocumentStats } from './collab/useDocumentStats.js';
 import { CodeEditor } from './editor/CodeEditor.js';
+import {
+  createRoomId,
+  forgetJoin,
+  hasJoined,
+  pushLobby,
+  pushRoom,
+  rememberJoin,
+  roomFromLocation,
+} from './room.js';
+import { JoinGate } from './screens/JoinGate.js';
+import { Lobby } from './screens/Lobby.js';
 import { localUser, saveUser, type User } from './user.js';
 
-function documentIdFromLocation(): string {
-  return new URLSearchParams(location.search).get('doc') ?? 'demo';
-}
-
+/**
+ * Three states, decided by the address bar and by whether this tab has been
+ * through the door: the lobby, the join gate, and the room itself.
+ */
 export function App() {
   const [user, setUser] = useState(localUser);
-  const [documentId, setDocumentId] = useState(documentIdFromLocation);
-  const { session, status, peers } = useCollab(documentId, user);
-
-  const openDocument = useCallback((id: string) => {
-    if (id === documentIdFromLocation()) return;
-    const url = new URL(location.href);
-    url.searchParams.set('doc', id);
-    history.pushState({}, '', url);
-    setDocumentId(id);
-  }, []);
+  const [roomId, setRoomId] = useState(roomFromLocation);
+  const [joined, setJoined] = useState(() => {
+    const current = roomFromLocation();
+    return current !== null && hasJoined(current);
+  });
 
   useEffect(() => {
-    document.title = `${documentId} · Collaborative Code Editor`;
-  }, [documentId]);
+    document.title = roomId ? `${roomId} · Code Room` : 'Collaborative Code Editor';
+  }, [roomId]);
 
-  // The address bar is part of the interface here: a document is a link, and
-  // the back button should behave.
+  // The address bar is part of the interface here: a room is a link, and the
+  // back button should behave.
   useEffect(() => {
-    const onPopState = () => setDocumentId(documentIdFromLocation());
+    const onPopState = () => {
+      const current = roomFromLocation();
+      setRoomId(current);
+      setJoined(current !== null && hasJoined(current));
+    };
     addEventListener('popstate', onPopState);
     return () => removeEventListener('popstate', onPopState);
   }, []);
@@ -40,14 +50,62 @@ export function App() {
     setUser((current: User) => saveUser({ ...current, name }));
   }, []);
 
+  const enter = useCallback(
+    (id: string, name: string) => {
+      rename(name);
+      rememberJoin(id);
+      pushRoom(id);
+      setRoomId(id);
+      setJoined(true);
+    },
+    [rename],
+  );
+
+  const leave = useCallback(() => {
+    if (roomId) forgetJoin(roomId);
+    pushLobby();
+    setRoomId(null);
+    setJoined(false);
+  }, [roomId]);
+
+  if (roomId === null) {
+    return (
+      <Lobby name={user.name} onCreate={(name) => enter(createRoomId(), name)} onJoin={enter} />
+    );
+  }
+
+  if (!joined) {
+    return (
+      <JoinGate
+        roomId={roomId}
+        name={user.name}
+        onJoin={(name) => enter(roomId, name)}
+        onCancel={leave}
+      />
+    );
+  }
+
+  // Keyed on the room so that switching rooms remounts rather than trying to
+  // reuse a socket and a Y.Doc that belong to the previous one.
+  return <Room key={roomId} roomId={roomId} user={user} onRename={rename} onLeave={leave} />;
+}
+
+function Room({
+  roomId,
+  user,
+  onRename,
+  onLeave,
+}: {
+  roomId: string;
+  user: User;
+  onRename(name: string): void;
+  onLeave(): void;
+}) {
+  const { session, status, peers } = useCollab(roomId, user);
+
   return (
     <div className="app">
-      <Toolbar
-        documentId={documentId}
-        onOpenDocument={openDocument}
-        status={status}
-        peers={peers}
-      />
+      <Toolbar roomId={roomId} onLeave={onLeave} status={status} peers={peers} />
 
       {status === 'offline' && (
         <p className="notice">
@@ -57,11 +115,15 @@ export function App() {
       )}
       {status === 'rejected' && (
         <p className="notice notice--error">
-          The server refused this document. Check the name and try another.
+          The server refused this room. Check the link and try again.
         </p>
       )}
 
-      {session ? <Document session={session} user={user} onRename={rename} /> : <div className="editor" />}
+      {session ? (
+        <Document session={session} user={user} onRename={onRename} />
+      ) : (
+        <div className="editor" />
+      )}
     </div>
   );
 }

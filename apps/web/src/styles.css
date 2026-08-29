@@ -59,38 +59,40 @@ body {
   box-shadow: 0 0 0 3px rgb(97 175 239 / 0.15);
 }
 
-.toolbar__doc {
+.toolbar__room {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
 }
 
-.toolbar__docPrefix {
+.toolbar__roomPrefix {
   color: var(--muted);
   font-family: var(--mono);
   font-size: 12px;
 }
 
-.toolbar__docInput {
-  width: 16ch;
-  padding: 4px 8px;
-  border: 1px solid transparent;
+.toolbar__roomId {
+  padding: 3px 8px;
   border-radius: 5px;
-  background: transparent;
+  background: var(--bg);
   color: var(--yellow);
   font-family: var(--mono);
   font-size: 13px;
+  letter-spacing: 0.02em;
+  user-select: all;
 }
 
-.toolbar__docInput:hover {
-  border-color: var(--border);
-}
-
-.toolbar__docInput:focus {
-  outline: none;
-  border-color: var(--accent);
+/* Only rendered when the clipboard refused. */
+.toolbar__fallback {
+  width: 30ch;
+  padding: 4px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
   background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
 }
 
 .toolbar__right {
@@ -319,4 +321,169 @@ body {
   .peers__empty {
     display: none;
   }
+}
+
+/* ------------------------------------------------------------- gate/lobby */
+
+/*
+ * The lobby and the join gate are the same card on the same empty page: one is
+ * where a room starts, the other is where a shared link lands.
+ */
+.gate {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.gate__card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 380px;
+  padding: 28px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.gate__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.gate__mark {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgb(97 175 239 / 0.15);
+  flex: 0 0 auto;
+}
+
+.gate__title {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.gate__lede {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.gate__roomCode {
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--yellow);
+  font-family: var(--mono);
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  text-align: center;
+  user-select: all;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field__label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.field__input {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-strong);
+  font: inherit;
+}
+
+.field__input--mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.field__input::placeholder {
+  color: var(--muted);
+}
+
+.field__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.button--primary {
+  padding: 9px 12px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #16191d;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.button--primary:hover {
+  background: #7cbef2;
+  border-color: #7cbef2;
+  color: #16191d;
+}
+
+.gate__divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.gate__divider::before,
+.gate__divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.gate__join {
+  display: flex;
+  gap: 8px;
+}
+
+.gate__join .field__input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.gate__error {
+  margin: 0;
+  color: var(--red);
+  font-size: 12px;
+}
+
+.gate__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.gate__link:hover {
+  color: var(--text-strong);
 }
